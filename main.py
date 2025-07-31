@@ -67,7 +67,6 @@ Here is the document content:
 
     response = call_groq(prompt)
     return {"insights": response}
-
 def call_groq(prompt: str) -> str:
     groq_api_url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
