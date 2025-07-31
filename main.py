@@ -70,7 +70,10 @@ Here is the document content:
 {extracted_text[:8000]}
 """
 # Add the custom prompt (if any)
-final_prompt = input.customPrompt + "\n\n" + base_prompt if input.customPrompt else base_prompt
+final_prompt = (
+        input.customPrompt.strip() + "\n\n" + base_prompt
+        if input.customPrompt else base_prompt
+    )
 
 response = call_groq(final_prompt)
 
