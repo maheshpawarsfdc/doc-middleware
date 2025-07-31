@@ -40,7 +40,7 @@ def process_file(input: FileInput):
     prompt = f"""
 You are a legal and business document analysis assistant.
 
-Analyze the following document text and return insights in **this exact format** with **each section starting on a new line**:
+Analyze the following document text and return insights in this **exact format** with each section starting on a **new line**, and make sure to include **line breaks between sections and list items**:
 
 ---
 
@@ -48,22 +48,27 @@ Analyze the following document text and return insights in **this exact format**
 [A concise 3–5 sentence overview of what the document is about.]
 
 **Named Entities**  
-People: [list]  
-Organizations: [list]  
-Dates: [list]  
-Monetary Values: [list]  
+People:  
+- [list of people]  
+Organizations:  
+- [list of orgs]  
+Dates:  
+- [list of dates]  
+Monetary Values:  
+- [list of monetary values]
 
 **Potential Risks or Red Flags**  
-- [Each item on a new line]
+- [Each item should appear on its own line starting with `-`]
 
 **Recommended Action Items**  
-- [Each item on a new line]
+- [Each item should appear on its own line starting with `-`]
 
 ---
 
 Here is the document content:
 {extracted_text[:8000]}
 """
+
 
     response = call_groq(prompt)
     return {"insights": response}
