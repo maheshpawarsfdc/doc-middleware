@@ -71,7 +71,7 @@ Here is the document content:
 def call_groq(prompt: str) -> str:
     groq_api_url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {os.environ.get('GROQ_API_KEY')}",
+        "Authorization": "Bearer {os.environ.get('GROQ_API_KEY')}",
         "Content-Type": "application/json"
     }
     payload = {
