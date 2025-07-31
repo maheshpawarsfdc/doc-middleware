@@ -12,7 +12,8 @@ app = FastAPI()
 class FileInput(BaseModel):
     filename: str
     filedata: str
-
+    customPrompt: str | None = None
+    
 @app.post("/process")
 def process_file(input: FileInput):
     filename = input.filename
@@ -68,9 +69,11 @@ Monetary Values:
 Here is the document content:
 {extracted_text[:8000]}
 """
+# Add the custom prompt (if any)
+final_prompt = input.customPrompt + "\n\n" + base_prompt if input.customPrompt else base_prompt
 
+response = call_groq(final_prompt)
 
-    response = call_groq(prompt)
     return {"insights": response}
 def call_groq(prompt: str) -> str:
     groq_api_url = "https://api.groq.com/openai/v1/chat/completions"
