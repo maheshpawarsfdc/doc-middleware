@@ -1,5 +1,4 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import base64
 import pdfplumber
@@ -10,26 +9,10 @@ import os
 
 app = FastAPI()
 
-# Optional: Allow CORS (useful if calling from LWC directly in future)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # You can restrict to specific LWC domain later
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Health check route (GET /)
-@app.get("/")
-def read_root():
-    return {"message": "🧠 Document Middleware is running!"}
-
-# Request body model
 class FileInput(BaseModel):
     filename: str
     filedata: str
 
-# Main processing endpoint (POST /process)
 @app.post("/process")
 def process_file(input: FileInput):
     filename = input.filename
@@ -38,26 +21,22 @@ def process_file(input: FileInput):
 
     print(f"📩 Received file: {filename}")
 
-    try:
-        if filename.lower().endswith(".pdf"):
-            with pdfplumber.open(BytesIO(binary)) as pdf:
-                for page in pdf.pages:
-                    extracted_text += page.extract_text() or ""
-        elif filename.lower().endswith(".docx"):
-            doc = Document(BytesIO(binary))
-            for para in doc.paragraphs:
-                extracted_text += para.text + "\n"
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported file type")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Document parsing error: {str(e)}")
+    if filename.lower().endswith(".pdf"):
+        with pdfplumber.open(BytesIO(binary)) as pdf:
+            for page in pdf.pages:
+                extracted_text += page.extract_text() or ""
+    elif filename.lower().endswith(".docx"):
+        doc = Document(BytesIO(binary))
+        for para in doc.paragraphs:
+            extracted_text += para.text + "\n"
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
 
     if not extracted_text.strip():
         raise HTTPException(status_code=400, detail="No text could be extracted from the document.")
 
     print(f"📄 Extracted {len(extracted_text)} characters of text")
 
-    # Prompt for LLM
     prompt = f"""
 You are a legal and business document analysis assistant.
 
@@ -89,7 +68,6 @@ Here is the document content:
     response = call_groq(prompt)
     return {"insights": response}
 
-# Groq call function
 def call_groq(prompt: str) -> str:
     groq_api_url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -97,23 +75,15 @@ def call_groq(prompt: str) -> str:
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "llama3-70b-4096",  # or mistral-saba-24b for fallback
+        "model": "llama-3.3-70b-versatile",
         "messages": [
             {"role": "system", "content": "You are a document analysis assistant."},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.2,
-        "max_tokens": 2048,
-        "stream": False
+        "temperature": 0.2
     }
-
-    try:
-        res = requests.post(groq_api_url, headers=headers, json=payload, timeout=30)
-        res.raise_for_status()
-        return res.json()["choices"][0]["message"]["content"]
-    except requests.exceptions.RequestException as e:
-        print("🔴 Request failed:", str(e))
-        raise HTTPException(status_code=500, detail=f"Request error: {str(e)}")
-    except Exception as e:
-        print("🔴 Unexpected error:", str(e))
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+    res = requests.post(groq_api_url, headers=headers, json=payload)
+    if res.status_code != 200:
+        raise Exception(res.text)
+    print("✅ Groq returned a response.")
+    return res.json()["choices"][0]["message"]["content"]
