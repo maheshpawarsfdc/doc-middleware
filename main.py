@@ -53,35 +53,82 @@ def process_file(input: FileInput):
     print(f"📄 Extracted {len(extracted_text)} characters of text")
 
     base_prompt = f"""
-You are a legal and business document analysis assistant.
+You are an expert legal and business document analysis assistant specialized in HR, Sales, and Legal document review.
 
-Analyze the following document text and return insights in this **exact format** with each section starting on a **new line**, and make sure to include **line breaks between sections and list items**:
+**DOCUMENT CONTEXT:** Analyze this document as if you are reviewing it for a compliance team in a corporate environment. Focus on business-critical insights, regulatory compliance, and actionable recommendations.
+
+**ANALYSIS INSTRUCTIONS:**
+1. First, identify the document type (contract, resume, NDA, policy, etc.)
+2. Extract key information with high accuracy
+3. Flag potential compliance issues or business risks
+4. Provide specific, actionable recommendations
+5. Use professional language suitable for business stakeholders
+
+**OUTPUT FORMAT:** Return your analysis in this exact structure with proper line breaks:
+
+---
+**Document Type & Classification**
+[Identify: Contract, Resume, NDA, Policy, Agreement, etc.]
+
+**Document Summary**
+[Provide a concise 3-5 sentence executive overview covering: purpose, key parties involved, main terms/conditions, and overall significance]
+
+**Key Information Extracted**
+
+**People & Roles:**
+- [Name] - [Role/Title] - [Organization if mentioned]
+
+**Organizations & Entities:**
+- [Organization Name] - [Type: Company/Agency/etc.] - [Role in document]
+
+**Important Dates:**
+- [Date] - [Significance: Effective date, Expiration, Deadline, etc.]
+
+**Monetary Values & Terms:**
+- [Amount] - [Context: Salary, Fee, Penalty, Budget, etc.]
+
+**Critical Clauses & Terms:**
+- [Brief description of key contractual terms, obligations, or conditions]
+
+**Compliance & Risk Assessment**
+
+**Potential Risks or Red Flags:**
+- [HIGH/MEDIUM/LOW] [Specific risk with brief explanation]
+
+**Missing or Unclear Elements:**
+- [Items that should be present but are missing or ambiguous]
+
+**Regulatory Considerations:**
+- [Any compliance requirements, legal standards, or regulatory issues identified]
+
+**Actionable Recommendations**
+
+**Immediate Actions Required:**
+- [Priority 1 items that need immediate attention]
+
+**Follow-up Actions:**
+- [Items to address within specific timeframes]
+
+**Stakeholder Notifications:**
+- [Who should be informed about this document and why]
+
+**Document Management:**
+- [Filing, renewal dates, or administrative actions needed]
 
 ---
 
-**Document Summary**  
-[A concise 3–5 sentence overview of what the document is about.]
+**QUALITY GUIDELINES:**
+- Be specific and avoid generic statements
+- Include confidence levels when uncertain (e.g., "appears to be" for unclear information)
+- Focus on business impact and legal significance
+- Prioritize risks by severity (HIGH/MEDIUM/LOW)
+- Ensure all recommendations are actionable with clear next steps
 
-**Named Entities**  
-People:  
-- [list of people]  
-Organizations:  
-- [list of orgs]  
-Dates:  
-- [list of dates]  
-Monetary Values:  
-- [list of monetary values]
+**DOCUMENT CONTENT TO ANALYZE:**
 
-**Potential Risks or Red Flags**  
-- [Each item should appear on its own line starting with `-`]
+{extracted_text}
 
-**Recommended Action Items**  
-- [Each item should appear on its own line starting with `-`]
-
----
-
-Here is the document content:
-{extracted_text[:8000]}
+**End of analysis request.**
 """
 
     final_prompt = (
