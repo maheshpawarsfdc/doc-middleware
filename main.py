@@ -159,36 +159,84 @@ def extract_text_from_file(filename: str, binary: bytes) -> str:
 # Prompt Building Function
 # ----------------------------
 def build_analysis_prompt(extracted_text: str) -> str:
-    """Build a simplified analysis prompt that ensures consistent output format"""
+    """Build the analysis prompt with the extracted text"""
     return f"""
-You are a professional document analysis assistant. Analyze this document and provide a structured response.
+You are an expert legal and business document analysis assistant specialized in HR, Sales, and Legal document review.
 
-IMPORTANT: Use this EXACT format with these EXACT section headers:
+**DOCUMENT CONTEXT:** Analyze this document as if you are reviewing it for a compliance team in a corporate environment. Focus on business-critical insights, regulatory compliance, and actionable recommendations.
 
-**Document Type**
-[State what type of document this is - contract, resume, policy, etc.]
+**ANALYSIS INSTRUCTIONS:**
+1. First, identify the document type (contract, resume, NDA, policy, etc.)
+2. Extract key information with high accuracy
+3. Flag potential compliance issues or business risks
+4. Provide specific, actionable recommendations
+5. Use professional language suitable for business stakeholders
 
-**Document Summary** 
-[Provide 3-5 sentences summarizing the document's purpose and key points]
+**OUTPUT FORMAT:** Return your analysis in this exact structure with proper line breaks:
 
-**Key Information**
-[Extract important details like:
-- People and their roles
-- Organizations mentioned  
-- Important dates
-- Monetary amounts
-- Key terms and conditions]
+---
+**Document Type & Classification**
+[Identify: Contract, Resume, NDA, Policy, Agreement, etc.]
 
-**Risk Assessment**
-[Identify potential risks, compliance issues, or red flags]
+**Document Summary**
+[Provide a concise 3-5 sentence executive overview covering: purpose, key parties involved, main terms/conditions, and overall significance]
 
-**Recommendations**
-[Provide specific action items and recommendations]
+**Key Information Extracted**
 
-Document to analyze:
+**People & Roles:**
+- [Name] - [Role/Title] - [Organization if mentioned]
+
+**Organizations & Entities:**
+- [Organization Name] - [Type: Company/Agency/etc.] - [Role in document]
+
+**Important Dates:**
+- [Date] - [Significance: Effective date, Expiration, Deadline, etc.]
+
+**Monetary Values & Terms:**
+- [Amount] - [Context: Salary, Fee, Penalty, Budget, etc.]
+
+**Critical Clauses & Terms:**
+- [Brief description of key contractual terms, obligations, or conditions]
+
+**Compliance & Risk Assessment**
+
+**Potential Risks or Red Flags:**
+- [HIGH/MEDIUM/LOW] [Specific risk with brief explanation]
+
+**Missing or Unclear Elements:**
+- [Items that should be present but are missing or ambiguous]
+
+**Regulatory Considerations:**
+- [Any compliance requirements, legal standards, or regulatory issues identified]
+
+**Actionable Recommendations**
+
+**Immediate Actions Required:**
+- [Priority 1 items that need immediate attention]
+
+**Follow-up Actions:**
+- [Items to address within specific timeframes]
+
+**Stakeholder Notifications:**
+- [Who should be informed about this document and why]
+
+**Document Management:**
+- [Filing, renewal dates, or administrative actions needed]
+
+---
+
+**QUALITY GUIDELINES:**
+- Be specific and avoid generic statements
+- Include confidence levels when uncertain (e.g., "appears to be" for unclear information)
+- Focus on business impact and legal significance
+- Prioritize risks by severity (HIGH/MEDIUM/LOW)
+- Ensure all recommendations are actionable with clear next steps
+
+**DOCUMENT CONTENT TO ANALYZE:**
+
 {extracted_text}
 
-Remember: Use the exact section headers shown above with double asterisks.
+**End of analysis request.**
 """
 
 # ----------------------------
