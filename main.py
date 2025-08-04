@@ -175,18 +175,18 @@ You are an expert legal and business document analysis assistant specialized in 
 **Document Type & Classification**
 [Identify: Contract, Resume, NDA, Policy, Agreement, etc.]
 **Document Summary**
-[Provide a concise 3-5 sentence executive overview covering: purpose, key parties involved, main terms/conditions, and overall significance]
+[Provide a concise 5-8 sentence executive overview covering: purpose, key parties involved, main terms/conditions, and overall significance]
 **Key Information Extracted**
 **People & Roles:**
 - [Name] - [Role/Title] - [Organization if mentioned]
 **Organizations & Entities:**
 - [Organization Name] - [Type: Company/Agency/etc.] - [Role in document]
 **Important Dates:**
-- [Date Label/Context]: [Date] - [Additional significance if any]
-Examples: "Joining Date: 16 Aug 2025", "Contract End Date: 31 Dec 2025", "Notice Period Deadline: 15 Sep 2025"
+- - Format: "[Purpose/Label]: [Date] - [Additional context if relevant]"
+- Examples: "Employment Start Date: 1 Jan 2025", "Probation End: 30 Jun 2025"
 **Monetary Values & Terms:**
-- [Amount Label/Context]: [Currency][Amount] - [Additional details if relevant]
-Examples: "Fixed CTC: ₹1,000,000 annually", "Variable Pay: ₹200,000 (20% of fixed)", "Joining Bonus: ₹100,000 (one-time)"
+- - Format: "[Purpose/Label]: [Currency][Amount] - [Additional context if relevant]" 
+- Examples: "Base Salary: $75,000 annually", "Performance Bonus: $10,000 (quarterly)"
 **Critical Clauses & Terms:**
 - [Brief description of key contractual terms, obligations, or conditions]
 **Compliance & Risk Assessment**
