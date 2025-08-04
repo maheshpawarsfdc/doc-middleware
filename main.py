@@ -162,9 +162,7 @@ def build_analysis_prompt(extracted_text: str) -> str:
     """Build the analysis prompt with the extracted text"""
     return f"""
 You are an expert legal and business document analysis assistant specialized in HR, Sales, and Legal document review.
-
 **DOCUMENT CONTEXT:** Analyze this document as if you are reviewing it for a compliance team in a corporate environment. Focus on business-critical insights, regulatory compliance, and actionable recommendations.
-
 **ANALYSIS INSTRUCTIONS:**
 1. First, identify the document type (contract, resume, NDA, policy, etc.)
 2. Extract key information with high accuracy
@@ -173,57 +171,51 @@ You are an expert legal and business document analysis assistant specialized in 
 5. Use professional language suitable for business stakeholders
 
 **OUTPUT FORMAT:** Return your analysis in this exact structure with proper line breaks:
-
 ---
 **Document Type & Classification**
 [Identify: Contract, Resume, NDA, Policy, Agreement, etc.]
-
 **Document Summary**
 [Provide a concise 3-5 sentence executive overview covering: purpose, key parties involved, main terms/conditions, and overall significance]
-
 **Key Information Extracted**
-
 **People & Roles:**
 - [Name] - [Role/Title] - [Organization if mentioned]
-
 **Organizations & Entities:**
 - [Organization Name] - [Type: Company/Agency/etc.] - [Role in document]
-
 **Important Dates:**
-- [Date] - [Significance: Effective date, Expiration, Deadline, etc.]
-
+- [Date Label/Context]: [Date] - [Additional significance if any]
+Examples: "Joining Date: 16 Aug 2025", "Contract End Date: 31 Dec 2025", "Notice Period Deadline: 15 Sep 2025"
 **Monetary Values & Terms:**
-- [Amount] - [Context: Salary, Fee, Penalty, Budget, etc.]
-
+- [Amount Label/Context]: [Currency][Amount] - [Additional details if relevant]
+Examples: "Fixed CTC: ₹1,000,000 annually", "Variable Pay: ₹200,000 (20% of fixed)", "Joining Bonus: ₹100,000 (one-time)"
 **Critical Clauses & Terms:**
 - [Brief description of key contractual terms, obligations, or conditions]
-
 **Compliance & Risk Assessment**
-
 **Potential Risks or Red Flags:**
 - [HIGH/MEDIUM/LOW] [Specific risk with brief explanation]
-
 **Missing or Unclear Elements:**
 - [Items that should be present but are missing or ambiguous]
-
 **Regulatory Considerations:**
 - [Any compliance requirements, legal standards, or regulatory issues identified]
-
 **Actionable Recommendations**
-
 **Immediate Actions Required:**
 - [Priority 1 items that need immediate attention]
-
 **Follow-up Actions:**
 - [Items to address within specific timeframes]
-
 **Stakeholder Notifications:**
 - [Who should be informed about this document and why]
-
 **Document Management:**
 - [Filing, renewal dates, or administrative actions needed]
-
 ---
+**CRITICAL EXTRACTION GUIDELINES:**
+**For Dates:** Always include the context/label before the date. Never list just raw dates.
+- Format: "[Purpose/Label]: [Date] - [Additional context if relevant]"
+- Examples: "Employment Start Date: 1 Jan 2025", "Probation End: 30 Jun 2025", "Annual Review Due: 31 Dec 2025"
+
+**For Monetary Values:** Always include what the amount represents. Never list just raw numbers.
+- Format: "[Purpose/Label]: [Currency][Amount] - [Additional context if relevant]"
+- Examples: "Base Salary: $75,000 annually", "Performance Bonus: $10,000 (quarterly)", "Severance Pay: $25,000 (3 months)"
+
+**For Currency:** Use appropriate currency symbols (₹, $, €, £) based on document context.
 
 **QUALITY GUIDELINES:**
 - Be specific and avoid generic statements
@@ -231,11 +223,10 @@ You are an expert legal and business document analysis assistant specialized in 
 - Focus on business impact and legal significance
 - Prioritize risks by severity (HIGH/MEDIUM/LOW)
 - Ensure all recommendations are actionable with clear next steps
-
+- NEVER extract dates or amounts without their contextual labels
+- If context is unclear, use descriptive labels like "Unspecified Date" or "Miscellaneous Amount"
 **DOCUMENT CONTENT TO ANALYZE:**
-
 {extracted_text}
-
 **End of analysis request.**
 """
 
