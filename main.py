@@ -158,87 +158,110 @@ def extract_text_from_file(filename: str, binary: bytes) -> str:
 # ----------------------------
 # Prompt Building Function
 # ----------------------------
+# Replace this function in your FastAPI server (paste-4.txt)
+
 def build_analysis_prompt(extracted_text: str) -> str:
-    """Build the analysis prompt with the extracted text and improved contextual instructions"""
+    """Build the analysis prompt with the extracted text"""
     return f"""
 You are an expert legal and business document analysis assistant specialized in HR, Sales, and Legal document review.
+**DOCUMENT CONTEXT:** Analyze this document as if you are reviewing it for a compliance team in a corporate environment. Focus on business-critical insights, regulatory compliance, and actionable recommendations.
+**ANALYSIS INSTRUCTIONS:**
+1. First, identify the document type (contract, resume, NDA, policy, etc.)
+2. Extract key information with high accuracy
+3. Flag potential compliance issues or business risks
+4. Provide specific, actionable recommendations
+5. Use professional language suitable for business stakeholders
 
-DOCUMENT CONTEXT: Analyze this document as if you are reviewing it for a compliance and business operations team in a corporate environment. Focus on business-critical insights, regulatory compliance, risks, and clear actionable recommendations.
-
-ANALYSIS INSTRUCTIONS:
-1. Identify the document type (e.g., contract, resume, NDA, policy, agreement, etc.)
-2. Extract key information with context-aware labeling (e.g., "16 Aug 2025 – Joining Date" instead of just the date)
-3. For each date or monetary value, **explain its significance or label clearly**
-   - Examples:
-     - "16 Aug 2025 – Employee Joining Date"
-     - "₹1,000,000 – Fixed Annual CTC"
-     - "₹100,000 – One-Time Signing Bonus"
-4. Flag potential compliance issues or business risks
-5. Provide specific, actionable recommendations for business/legal stakeholders
-
-OUTPUT FORMAT: Return your analysis in this exact structure with professional formatting:
-
+**OUTPUT FORMAT:** Return your analysis in this exact structure with proper line breaks:
 ---
-Document Type & Classification
+**Document Type & Classification**
 [Identify: Contract, Resume, NDA, Policy, Agreement, etc.]
 
-Document Summary
-[Provide a concise 3–5 sentence executive overview: purpose, key parties involved, main terms/conditions, and overall significance.]
+**Document Summary**
+[Provide a concise 3-5 sentence executive overview covering: purpose, key parties involved, main terms/conditions, and overall significance]
 
-Key Information Extracted
+**Key Information Extracted**
+**People & Roles:**
+- [Name] - [Role/Title] - [Organization if mentioned]
 
-People & Roles:
-- [Name] – [Role/Title] – [Organization if mentioned]
+**Organizations & Entities:**
+- [Organization Name] - [Type: Company/Agency/etc.] - [Role in document]
 
-Organizations & Entities:
-- [Organization Name] – [Type: Company/Agency/etc.] – [Role in document]
+**Important Dates:**
+CRITICAL: Every date MUST follow this exact format: "[Label]: [Date]"
+- [Date Label/Context]: [Date] - [Additional significance if any]
+Examples: "Joining Date: 16 Aug 2025", "Contract End Date: 31 Dec 2025", "Notice Period Deadline: 15 Sep 2025"
+DO NOT write dates like "16 Aug 2025" - ALWAYS include the label like "Joining Date: 16 Aug 2025"
 
-Important Dates:
-- [Date] – [Explanation: e.g., Joining Date, Expiry Date, Deadline, Review Cycle, etc.]
+**Monetary Values & Terms:**
+CRITICAL: Every amount MUST follow this exact format: "[Label]: [Currency][Amount]"
+- [Amount Label/Context]: [Currency][Amount] - [Additional details if relevant]
+Examples: "Fixed CTC: ₹1,000,000 annually", "Variable Pay: ₹200,000 (20% of fixed)", "Joining Bonus: ₹100,000 (one-time)"
+DO NOT write amounts like "1000000" - ALWAYS include the label like "Fixed CTC: ₹1,000,000"
 
-Monetary Values & Terms:
-- [Amount] – [Context: e.g., Fixed CTC, Variable Pay, Bonus, Penalty, Budget Cap, etc.]
+**Critical Clauses & Terms:**
+- [Brief description of key contractual terms, obligations, or conditions]
 
-Critical Clauses & Terms:
-- [Summary of key clauses, legal conditions, or obligations]
+**Compliance & Risk Assessment**
+**Potential Risks or Red Flags:**
+- [HIGH/MEDIUM/LOW] [Specific risk with brief explanation]
 
-Compliance & Risk Assessment
+**Missing or Unclear Elements:**
+- [Items that should be present but are missing or ambiguous]
 
-Potential Risks or Red Flags:
-- [HIGH/MEDIUM/LOW] – [Specific risk with brief explanation]
+**Regulatory Considerations:**
+- [Any compliance requirements, legal standards, or regulatory issues identified]
 
-Missing or Unclear Elements:
-- [List of expected sections or terms that are missing or ambiguous]
+**Actionable Recommendations**
+**Immediate Actions Required:**
+- [Priority 1 items that need immediate attention]
 
-Regulatory Considerations:
-- [Any legal or compliance references that apply to this document]
+**Follow-up Actions:**
+- [Items to address within specific timeframes]
 
-Actionable Recommendations
+**Stakeholder Notifications:**
+- [Who should be informed about this document and why]
 
-Immediate Actions Required:
-- [Urgent follow-ups based on high-risk findings]
-
-Follow-up Actions:
-- [Tasks or clarifications needed within 7–30 days]
-
-Stakeholder Notifications:
-- [Who needs to be informed (e.g., HR, Finance, Legal) and why]
-
-Document Management:
-- [Details for filing, review reminders, renewal dates, archiving steps, etc.]
-
+**Document Management:**
+- [Filing, renewal dates, or administrative actions needed]
 ---
-QUALITY GUIDELINES:
-- Use **clear and complete context labels** for dates and monetary values
-- Avoid generic statements; be precise and concise
-- If unsure, use qualifiers like "likely", "appears to be", or "possibly"
-- Rank risks and actions by impact and urgency
-- Ensure all outputs are in **business-ready language** suitable for professional review
 
-DOCUMENT CONTENT TO ANALYZE:
+**CRITICAL EXTRACTION GUIDELINES:**
+
+**For Dates:** ALWAYS include the context/label before the date. NEVER list just raw dates.
+- Format: "[Purpose/Label]: [Date] - [Additional context if relevant]"
+- Examples: "Employment Start Date: 1 Jan 2025", "Probation End: 30 Jun 2025", "Annual Review Due: 31 Dec 2025"
+- WRONG: "16 Aug 2025" 
+- CORRECT: "Joining Date: 16 Aug 2025"
+
+**For Monetary Values:** ALWAYS include what the amount represents. NEVER list just raw numbers.
+- Format: "[Purpose/Label]: [Currency][Amount] - [Additional context if relevant]"
+- Examples: "Base Salary: $75,000 annually", "Performance Bonus: $10,000 (quarterly)", "Severance Pay: $25,000 (3 months)"
+- WRONG: "1000000"
+- CORRECT: "Fixed CTC: ₹1,000,000 annually"
+
+**For Currency:** Use appropriate currency symbols (₹, $, €, £) based on document context.
+
+**MANDATORY RULES:**
+1. NEVER extract dates or amounts without their contextual labels
+2. If context is unclear, use descriptive labels like "Unspecified Date: [date]" or "Miscellaneous Amount: [amount]"
+3. Every date MUST have a purpose/label explaining what it represents
+4. Every monetary value MUST have a label explaining what it represents
+5. If you cannot determine the context, explicitly state "Context unclear" but still provide a descriptive label
+
+**QUALITY GUIDELINES:**
+- Be specific and avoid generic statements
+- Include confidence levels when uncertain (e.g., "appears to be" for unclear information)
+- Focus on business impact and legal significance
+- Prioritize risks by severity (HIGH/MEDIUM/LOW)
+- Ensure all recommendations are actionable with clear next steps
+
+**DOCUMENT CONTENT TO ANALYZE:**
 {extracted_text}
 
-End of analysis request.
+**REMINDER: You MUST provide context labels for ALL dates and monetary values. Raw numbers and dates without context are NOT acceptable.**
+
+**End of analysis request.**
 """
 
 
