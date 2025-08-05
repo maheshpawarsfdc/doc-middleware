@@ -164,7 +164,9 @@ def build_analysis_prompt(extracted_text: str) -> str:
     """Build the analysis prompt with the extracted text"""
     return f"""
 You are an expert legal and business document analysis assistant specialized in HR, Sales, and Legal document review.
-**DOCUMENT CONTEXT:** Analyze this document as if you are reviewing it for a compliance team in a corporate environment. Focus on business-critical insights, regulatory compliance, and actionable recommendations.
+**DOCUMENT CONTEXT:** Analyze this document as if you are reviewing it for a compliance team in a corporate environment. 
+Focus on business-critical insights, regulatory compliance, and actionable recommendations, review everything and make a summary of everything that are the main/important things.
+
 **ANALYSIS INSTRUCTIONS:**
 1. First, identify the document type (contract, resume, NDA, policy, etc.)
 2. Extract key information with high accuracy
