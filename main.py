@@ -4,8 +4,8 @@ import base64
 import pdfplumber
 from docx import Document
 from io import BytesIO
+import os
 import logging
-from typing import Optional
 import time
 from contextlib import asynccontextmanager
 
@@ -20,42 +20,41 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("🚀 Document Conversion Middleware starting up...")
-    logger.info("✅ Middleware ready for document conversion")
+    logger.info("🚀 FastAPI Text Extraction Service starting up...")
     yield
     
     # Shutdown
-    logger.info("🛑 Document Conversion Middleware shutting down...")
+    logger.info("🛑 FastAPI Text Extraction Service shutting down...")
 
 app = FastAPI(
-    title="Document Conversion Middleware", 
+    title="Document Text Extraction Service", 
     version="3.0.0",
-    description="FastAPI middleware for document-to-text conversion only",
+    description="Middleware service for extracting text from PDF and DOCX files",
     lifespan=lifespan
 )
 
 # ----------------------------
 # Models
 # ----------------------------
-class ConversionRequest(BaseModel):
+class FileInput(BaseModel):
     filename: str
-    filedata: str  # base64 encoded
+    filedata: str
 
-class ConversionResponse(BaseModel):
-    extracted_text: str
+class TextExtractionResponse(BaseModel):
+    extractedText: str
     filename: str
-    file_size_bytes: int
-    pages_processed: Optional[int] = None
-    paragraphs_processed: Optional[int] = None
-    conversion_time_ms: int
+    fileSize: int
+    textLength: int
+    pages: int = 0
+    paragraphs: int = 0
     status: str
     request_id: str
+    timestamp: float
 
 # ----------------------------
 # Configuration
 # ----------------------------
 MAX_FILE_SIZE = 15 * 1024 * 1024  # 15MB limit
-MAX_TEXT_LENGTH = 100000  # 100K characters max
 
 # ----------------------------
 # Error Handlers
@@ -79,114 +78,82 @@ async def general_exception_handler(request, exc):
     }
 
 # ----------------------------
-# /convert Endpoint - MAIN CONVERSION ENDPOINT
+# /extract-text Endpoint - NEW
 # ----------------------------
-@app.post("/convert", response_model=ConversionResponse)
-async def convert_document(request: ConversionRequest):
+@app.post("/extract-text", response_model=TextExtractionResponse)
+async def extract_text(input: FileInput):
     request_id = str(int(time.time() * 1000))
-    start_time = time.time()
-    logger.info(f"[{request_id}] 📄 Converting document: {request.filename}")
+    logger.info(f"[{request_id}] 📄 Extracting text from file: {input.filename}")
     
     try:
         # Input validation
-        if not request.filename:
+        if not input.filename:
             raise HTTPException(status_code=400, detail="Filename is required")
         
-        if not request.filedata:
+        if not input.filedata:
             raise HTTPException(status_code=400, detail="File data is required")
-        
-        # Validate file type
-        supported_extensions = ['.pdf', '.docx']
-        file_extension = None
-        for ext in supported_extensions:
-            if request.filename.lower().endswith(ext):
-                file_extension = ext
-                break
-        
-        if not file_extension:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Unsupported file type. Supported formats: {', '.join(supported_extensions)}"
-            )
         
         # Decode and validate file data
         try:
-            binary_data = base64.b64decode(request.filedata)
+            binary = base64.b64decode(input.filedata)
         except Exception as e:
             logger.error(f"[{request_id}] ❌ Base64 decode error: {str(e)}")
             raise HTTPException(status_code=400, detail="Invalid base64 file data")
         
         # Check file size
-        if len(binary_data) > MAX_FILE_SIZE:
+        if len(binary) > MAX_FILE_SIZE:
             raise HTTPException(
                 status_code=413, 
                 detail=f"File too large. Maximum size: {MAX_FILE_SIZE/1024/1024:.1f}MB"
             )
         
-        logger.info(f"[{request_id}] 📊 File size: {len(binary_data)} bytes")
+        logger.info(f"[{request_id}] 📊 File size: {len(binary)} bytes")
         
-        # Extract text based on file type
-        extraction_result = await extract_text_from_file(
-            request.filename, 
-            binary_data, 
-            file_extension,
-            request_id
-        )
+        # Extract text and metadata
+        extraction_result = await extract_text_from_file(input.filename, binary, request_id)
         
-        extracted_text = extraction_result['text']
-        pages_processed = extraction_result.get('pages')
-        paragraphs_processed = extraction_result.get('paragraphs')
+        if not extraction_result['text'].strip():
+            raise HTTPException(status_code=400, detail="No text could be extracted from the document")
         
-        if not extracted_text.strip():
-            raise HTTPException(
-                status_code=422, 
-                detail="No text could be extracted from the document"
-            )
-
-        # Truncate if too long
-        original_length = len(extracted_text)
-        if len(extracted_text) > MAX_TEXT_LENGTH:
-            logger.warning(f"[{request_id}] ⚠️ Text truncated from {original_length} to {MAX_TEXT_LENGTH} characters")
-            extracted_text = extracted_text[:MAX_TEXT_LENGTH] + "\n\n[Document truncated due to length...]"
+        logger.info(f"[{request_id}] ✅ Text extraction completed successfully")
         
-        conversion_time = int((time.time() - start_time) * 1000)
-        
-        logger.info(f"[{request_id}] ✅ Conversion completed in {conversion_time}ms - {len(extracted_text)} characters extracted")
-        
-        return ConversionResponse(
-            extracted_text=extracted_text,
-            filename=request.filename,
-            file_size_bytes=len(binary_data),
-            pages_processed=pages_processed,
-            paragraphs_processed=paragraphs_processed,
-            conversion_time_ms=conversion_time,
+        return TextExtractionResponse(
+            extractedText=extraction_result['text'],
+            filename=input.filename,
+            fileSize=len(binary),
+            textLength=len(extraction_result['text']),
+            pages=extraction_result.get('pages', 0),
+            paragraphs=extraction_result.get('paragraphs', 0),
             status="success",
-            request_id=request_id
+            request_id=request_id,
+            timestamp=time.time()
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"[{request_id}] ❌ Conversion failed: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Document conversion failed: {str(e)}")
+        logger.error(f"[{request_id}] ❌ Unexpected error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Text extraction failed: {str(e)}")
 
 # ----------------------------
-# Text Extraction Function - UPDATED
+# Text Extraction Function - IMPROVED
 # ----------------------------
-async def extract_text_from_file(filename: str, binary_data: bytes, file_extension: str, request_id: str) -> dict:
-    """Extract text from PDF or DOCX files - returns dict with text and metadata"""
+async def extract_text_from_file(filename: str, binary: bytes, request_id: str) -> dict:
+    """Extract text from PDF or DOCX files with improved error handling"""
     extracted_text = ""
-    pages_processed = None
-    paragraphs_processed = None
+    metadata = {
+        'pages': 0,
+        'paragraphs': 0
+    }
     
     try:
-        if file_extension == '.pdf':
+        if filename.lower().endswith(".pdf"):
             logger.info(f"[{request_id}] 📄 Processing PDF file")
             
             try:
-                with pdfplumber.open(BytesIO(binary_data)) as pdf:
+                with pdfplumber.open(BytesIO(binary)) as pdf:
                     total_pages = len(pdf.pages)
-                    pages_processed = total_pages
+                    metadata['pages'] = total_pages
                     logger.info(f"[{request_id}] 📊 PDF has {total_pages} pages")
                     
                     if total_pages == 0:
@@ -205,13 +172,13 @@ async def extract_text_from_file(filename: str, binary_data: bytes, file_extensi
                 logger.error(f"[{request_id}] ❌ PDF processing failed: {str(e)}")
                 raise HTTPException(status_code=422, detail=f"PDF processing failed: {str(e)}")
                         
-        elif file_extension == '.docx':
+        elif filename.lower().endswith(".docx"):
             logger.info(f"[{request_id}] 📄 Processing DOCX file")
             
             try:
-                doc = Document(BytesIO(binary_data))
+                doc = Document(BytesIO(binary))
                 total_paragraphs = len(doc.paragraphs)
-                paragraphs_processed = total_paragraphs
+                metadata['paragraphs'] = total_paragraphs
                 logger.info(f"[{request_id}] 📊 DOCX has {total_paragraphs} paragraphs")
                 
                 if total_paragraphs == 0:
@@ -241,8 +208,8 @@ async def extract_text_from_file(filename: str, binary_data: bytes, file_extensi
     
     return {
         'text': extracted_text.strip(),
-        'pages': pages_processed,
-        'paragraphs': paragraphs_processed
+        'pages': metadata['pages'],
+        'paragraphs': metadata['paragraphs']
     }
 
 # ----------------------------
@@ -250,14 +217,13 @@ async def extract_text_from_file(filename: str, binary_data: bytes, file_extensi
 # ----------------------------
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for conversion service"""
+    """Health check endpoint"""
     return {
         "status": "healthy",
-        "service": "Document Conversion Middleware",
-        "version": "3.0.0",
         "timestamp": time.time(),
+        "version": "3.0.0",
+        "service": "Text Extraction Only",
         "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024),
-        "max_text_length": MAX_TEXT_LENGTH,
         "supported_formats": ["PDF", "DOCX"]
     }
 
@@ -268,17 +234,17 @@ async def health_check():
 async def root():
     """API information endpoint"""
     return {
-        "name": "Document Conversion Middleware",
+        "name": "Document Text Extraction Service",
         "version": "3.0.0",
-        "description": "FastAPI middleware for document-to-text conversion only",
+        "description": "FastAPI service for extracting text from documents (PDF, DOCX)",
         "endpoints": {
-            "/convert": "POST - Convert document to text",
+            "/extract-text": "POST - Extract text from document files",
             "/health": "GET - Health check",
             "/docs": "GET - API documentation"
         },
         "supported_formats": ["PDF", "DOCX"],
         "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024),
-        "purpose": "Document conversion only - AI processing handled by client"
+        "note": "This service only extracts text. AI processing should be handled separately."
     }
 
 if __name__ == "__main__":
