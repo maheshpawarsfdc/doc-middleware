@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Document Analysis Middleware", 
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan
 )
 
@@ -79,7 +79,7 @@ class FollowupPayload(BaseModel):
 # Configuration
 # ----------------------------
 MAX_TEXT_LENGTH = 80000
-GROQ_TIMEOUT = 90
+GROQ_TIMEOUT = 120  # Increased timeout for comprehensive analysis
 MAX_FILE_SIZE = 15 * 1024 * 1024
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2
@@ -150,22 +150,22 @@ async def process_file(input: FileInput):
         
         logger.info(f"[{request_id}] 📄 Extracted {len(extracted_text)} characters of text")
 
-        # Build the ENHANCED prompt
-        base_prompt = build_enhanced_analysis_prompt(extracted_text)
-        final_prompt = (
-            input.customPrompt.strip() + "\n\n" + base_prompt
-            if input.customPrompt else base_prompt
-        )
+        # Build the ENHANCED prompt with summary focus
+        final_prompt = build_comprehensive_analysis_prompt(extracted_text, input.customPrompt)
         
         # Call AI service with proper error handling and retry
         response = await call_groq_with_retry(final_prompt, request_id)
         
-        logger.info(f"[{request_id}] ✅ Analysis completed successfully")
+        # ENHANCED: Validate summary quality before returning
+        summary_quality = validate_summary_quality(response, request_id)
+        
+        logger.info(f"[{request_id}] ✅ Analysis completed successfully - Summary quality: {summary_quality}")
         return {
             "insights": response, 
             "status": "success",
             "request_id": request_id,
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "summary_quality": summary_quality
         }
         
     except HTTPException:
@@ -242,130 +242,138 @@ async def extract_text_from_file(filename: str, binary: bytes, request_id: str) 
     return extracted_text.strip()
 
 # ----------------------------
-# ENHANCED Prompt Building Function
+# COMPREHENSIVE Prompt Building Function
 # ----------------------------
-def build_enhanced_analysis_prompt(extracted_text: str) -> str:
-    """Build the enhanced analysis prompt with stricter formatting requirements"""
-    return f"""
-You are an expert legal and business document analysis assistant specialized in HR, Sales, and Legal document review.
+def build_comprehensive_analysis_prompt(extracted_text: str, custom_prompt: Optional[str] = None) -> str:
+    """Build comprehensive analysis prompt with extreme focus on detailed summaries"""
+    
+    base_prompt = f"""
+🚨 EXECUTIVE SUMMARY PRIORITY 🚨
+You are a senior business analyst creating executive-level document briefings. The DOCUMENT SUMMARY is your PRIMARY DELIVERABLE and must be exceptionally detailed and comprehensive.
 
-**CRITICAL FORMATTING RULES - MUST BE FOLLOWED EXACTLY:**
+**CRITICAL SUCCESS CRITERIA:**
+✅ Summary must be 10-12 complete sentences (not bullet points)
+✅ Summary must be so detailed that executives never need to read the original document
+✅ Every important detail, date, amount, and term must be included in the summary
+✅ Written in flowing, professional prose suitable for C-level executives
 
-1. **FOR DATES:** You MUST provide context for EVERY date. NEVER list raw dates.
-   ❌ WRONG: "- January 15, 2024"
-   ✅ CORRECT: "- Employment Start Date: January 15, 2024"
-   ✅ CORRECT: "- Contract Expiry: January 14, 2026"
-   ✅ CORRECT: "- Birth Date: March 10, 1985"
+**MANDATORY FORMATTING RULES:**
 
-2. **FOR MONETARY VALUES:** You MUST provide context for EVERY amount. NEVER list raw amounts.
-   ❌ WRONG: "- $185,000"
-   ✅ CORRECT: "- Annual Salary: $185,000"
-   ✅ CORRECT: "- Signing Bonus: $25,000"
-   ✅ CORRECT: "- Hourly Rate: $10.50"
+1. **DATES:** Always provide context - NEVER list raw dates
+   ❌ WRONG: "January 15, 2024"
+   ✅ CORRECT: "Employment Start Date: January 15, 2024"
 
-3. **IF CONTEXT IS UNCLEAR:** Use descriptive labels based on document context.
-   Examples: "- Unspecified Payment: $500", "- Document Date: January 10, 2024"
+2. **MONETARY VALUES:** Always provide context - NEVER list raw amounts  
+   ❌ WRONG: "$185,000"
+   ✅ CORRECT: "Annual Base Salary: $185,000"
 
-**ANALYSIS INSTRUCTIONS:**
-Analyze this document for a compliance team in a corporate environment. Focus on business-critical insights, regulatory compliance, and actionable recommendations.
+3. **NO SHORTCUTS:** Every number, date, and amount must have descriptive context
 
-**OUTPUT FORMAT - FOLLOW EXACTLY:**
+**REQUIRED OUTPUT FORMAT:**
 
 **Document Type & Classification**
-[Identify: Contract, Resume, NDA, Policy, Agreement, etc.]
+[Precisely identify the document type and its business purpose]
 
-**Document Summary (MANDATORY — 10–12 sentences)**
-Provide a high-density, self-contained executive brief that eliminates the need to read the document.  
-
-Your summary MUST clearly state:
-1. Document type and primary purpose.  
-2. All key parties involved (people and organizations) with their roles.  
-3. Main terms, obligations, and conditions.  
-4. All critical dates with their meaning.  
-5. All important monetary amounts with their meaning.  
-6. Any special clauses, benefits, restrictions, or penalties.  
-7. Potential risks or compliance concerns.  
-8. Any deadlines or renewal requirements.  
-9. Missing information or ambiguities worth noting.  
-10. A one-line “overall significance” conclusion.  
-
-Write in complete sentences, easy for a business executive to read quickly.  
-Do **not** omit details — the reader should feel they fully understand the document without opening it.
+**Document Summary**
+[CRITICAL: This is your most important section. Write exactly 10-12 comprehensive sentences in flowing prose that capture EVERY important detail from the document. Include all parties, all amounts, all dates, all terms, all risks, and all recommendations. Make this so complete that the reader never needs to see the original document.]
 
 **Key Information Extracted**
 
 **People & Roles:**
-[List people with their roles and organizations]
-- [Name] - [Role/Title] - [Organization if mentioned]
+- [Full Name] - [Complete Title] - [Organization] - [Role in document]
 
-**Organizations & Entities:**
-[List organizations and their roles in the document]
-- [Organization Name] - [Type: Company/Agency/etc.] - [Role in document]
+**Organizations & Entities:**  
+- [Organization Name] - [Type] - [Specific role/relationship in document]
 
 **Important Dates:**
-[MANDATORY: Every date MUST have a descriptive label explaining what it represents]
-- [Date Purpose/Label]: [Date] - [Additional context if relevant]
-- [Date Purpose/Label]: [Date] - [Additional context if relevant]
+- [Descriptive Label]: [Date] - [Business significance/context]
 
 **Monetary Values & Terms:**
-[MANDATORY: Every amount MUST have a descriptive label explaining what it represents]
-- [Amount Purpose/Label]: [Currency][Amount] - [Additional context if relevant]
-- [Amount Purpose/Label]: [Currency][Amount] - [Additional context if relevant]
+- [Descriptive Label]: [Amount] - [Payment terms/frequency/conditions]
 
 **Critical Clauses & Terms:**
-[List key contractual terms, obligations, or conditions]
-- [Brief description of key terms]
+- [Key contractual terms, obligations, restrictions, benefits]
 
 **Compliance & Risk Assessment**
 
 **Potential Risks or Red Flags:**
-- [HIGH/MEDIUM/LOW] [Specific risk with brief explanation]
+- [HIGH/MEDIUM/LOW] [Specific risk with detailed explanation]
 
 **Missing or Unclear Elements:**
-- [Items that should be present but are missing or ambiguous]
+- [Important items that should be present but are missing or ambiguous]
 
 **Regulatory Considerations:**
-- [Any compliance requirements, legal standards, or regulatory issues identified]
+- [Compliance requirements, legal standards, regulatory issues]
 
 **Actionable Recommendations**
 
 **Immediate Actions Required:**
-- [Priority 1 items that need immediate attention]
+- [Priority actions with specific timelines]
 
 **Follow-up Actions:**
-- [Items to address within specific timeframes]
+- [Secondary actions with recommended timeframes]
 
 **Stakeholder Notifications:**
-- [Who should be informed about this document and why]
+- [Who needs to be informed and why]
 
 **Document Management:**
-- [Filing, renewal dates, or administrative actions needed]
+- [Filing, renewal, administrative requirements]
 
-**EXAMPLES OF CORRECT FORMATTING:**
+**EXAMPLE OF PERFECT SUMMARY:**
+"This employment agreement establishes John Smith as Senior Software Engineer at TechCorp Industries effective January 15, 2025, reporting directly to the VP of Engineering with responsibility for mobile development team leadership. The compensation package includes an annual base salary of $185,000, performance bonus potential up to $25,000, stock options valued at $50,000 vesting over four years, and a one-time $10,000 relocation allowance. The agreement specifies a 90-day probationary period ending April 15, 2025, during which termination requires only 24-hour notice from either party. Key benefits include immediate health insurance coverage, 20 vacation days annually, and access to company fitness facilities. The contract contains a 12-month non-compete restriction covering technology companies within 50 miles and confidentiality obligations extending two years post-employment. Annual performance reviews are scheduled for January 15th with salary adjustment consideration based on company performance metrics. The agreement automatically renews annually unless either party provides 30-day written notice of termination. Notable concerns include broad non-compete language that may significantly limit future employment opportunities and absence of specific intellectual property assignment clauses. Missing elements include detailed vacation accrual policies, sick leave provisions, and specific performance bonus calculation methods. This represents a standard corporate employment agreement requiring routine HR processing, employee handbook acknowledgment, and IT system access setup."
 
-**Important Dates:**
-- Employment Start Date: January 15, 2025
-- Probation Period End: July 15, 2025
-- Annual Review Due: January 15, 2026
-- Contract Expiration: December 31, 2027
-
-**Monetary Values & Terms:**
-- Base Annual Salary: $185,000
-- Performance Bonus Target: $25,000 (annual)
-- Stock Option Grant: $50,000 (vested over 4 years)
-- Relocation Allowance: $10,000 (one-time)
-
-**REMEMBER:** 
-- NEVER list raw dates without context
-- NEVER list raw amounts without context  
-- ALWAYS explain what each date and amount represents
-- If you're unsure of context, use descriptive labels like "Unspecified Date" or "Miscellaneous Payment"
-
-**DOCUMENT CONTENT TO ANALYZE:**
+**ANALYSIS TARGET:**
 {extracted_text}
 
-**FINAL REMINDER: Every date and monetary value MUST have a descriptive label. Raw numbers and dates are NOT acceptable.**
+**FINAL REMINDER:** The summary must be comprehensive enough that reading the original document becomes unnecessary for business decisions. Include ALL specific details, amounts, dates, and terms in flowing, executive-level prose.
 """
+
+    if custom_prompt:
+        return f"{custom_prompt.strip()}\n\n{base_prompt}"
+    return base_prompt
+
+# ----------------------------
+# NEW: Summary Quality Validation
+# ----------------------------
+def validate_summary_quality(response: str, request_id: str) -> str:
+    """Validate the quality and completeness of the generated summary"""
+    try:
+        # Extract the summary section
+        summary_start = response.find("**Document Summary**")
+        if summary_start == -1:
+            logger.warning(f"[{request_id}] ⚠️ No Document Summary section found")
+            return "missing"
+        
+        # Find the end of summary section
+        summary_end = response.find("**Key Information Extracted**", summary_start)
+        if summary_end == -1:
+            summary_end = len(response)
+        
+        summary_content = response[summary_start:summary_end].replace("**Document Summary**", "").strip()
+        
+        # Count sentences
+        sentences = [s.strip() for s in summary_content.split('.') if s.strip()]
+        sentence_count = len(sentences)
+        
+        # Check length
+        word_count = len(summary_content.split())
+        
+        logger.info(f"[{request_id}] 📊 Summary validation - Sentences: {sentence_count}, Words: {word_count}")
+        
+        # Quality assessment
+        if sentence_count >= 10 and word_count >= 200:
+            return "excellent"
+        elif sentence_count >= 8 and word_count >= 150:
+            return "good"
+        elif sentence_count >= 5 and word_count >= 100:
+            return "acceptable"
+        else:
+            logger.warning(f"[{request_id}] ⚠️ Summary quality concerns - only {sentence_count} sentences, {word_count} words")
+            return "needs_improvement"
+            
+    except Exception as e:
+        logger.error(f"[{request_id}] ❌ Error validating summary: {str(e)}")
+        return "validation_error"
 
 # ----------------------------
 # /followup Endpoint
@@ -410,7 +418,7 @@ async def followup_chat(payload: FollowupPayload):
 # Utility: Single prompt with retry
 # ----------------------------
 async def call_groq_with_retry(prompt: str, request_id: str, max_retries: int = MAX_RETRIES) -> str:
-    """Call Groq API with retry logic and proper error handling"""
+    """Call Groq API with retry logic and enhanced summary focus"""
     groq_api_key = os.environ.get('GROQ_API_KEY')
     if not groq_api_key:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
@@ -425,12 +433,13 @@ async def call_groq_with_retry(prompt: str, request_id: str, max_retries: int = 
         "messages": [
             {
                 "role": "system", 
-                "content": "You are a professional document analysis assistant. You MUST follow formatting instructions exactly. Every date and monetary value MUST have a descriptive label explaining what it represents. NEVER provide raw dates or amounts without context."
+                "content": "You are a senior business analyst specializing in executive document summaries. Your PRIMARY OBJECTIVE is creating comprehensive 10-12 sentence summaries that eliminate the need to read original documents. CRITICAL REQUIREMENTS: (1) Every summary must be exactly 10-12 sentences in flowing prose (2) Include ALL specific details: dates, amounts, parties, terms (3) Use descriptive labels for ALL dates and monetary values - NEVER raw numbers (4) Write for C-level executives making business decisions (5) Summary must be so complete that original document becomes unnecessary. Focus intensely on summary quality - this is your most important deliverable."
             },
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.1,  # Lower temperature for more consistent formatting
-        "max_tokens": 4000
+        "temperature": 0.05,  # Very low temperature for consistent, detailed formatting
+        "max_tokens": 5000,   # Increased for comprehensive summaries
+        "top_p": 0.9         # Added for more focused responses
     }
     
     last_error = None
@@ -577,11 +586,12 @@ async def health_check():
     health_status = {
         "status": "healthy",
         "timestamp": time.time(),
-        "version": "2.0.0",
+        "version": "2.1.0",
         "groq_api_configured": bool(os.environ.get('GROQ_API_KEY')),
         "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024),
         "max_text_length": MAX_TEXT_LENGTH,
-        "timeout_seconds": GROQ_TIMEOUT
+        "timeout_seconds": GROQ_TIMEOUT,
+        "summary_focus": "enhanced"
     }
     
     # Test Groq API connectivity (optional)
@@ -610,16 +620,24 @@ async def root():
     """API information endpoint"""
     return {
         "name": "Document Analysis Middleware",
-        "version": "2.0.0",
-        "description": "FastAPI middleware for document analysis using AI",
+        "version": "2.1.0",
+        "description": "FastAPI middleware for comprehensive document analysis with enhanced executive summary focus",
+        "features": [
+            "Enhanced 10-12 sentence executive summaries",
+            "Comprehensive document analysis", 
+            "Risk assessment and compliance checking",
+            "Summary quality validation",
+            "Retry logic and error handling"
+        ],
         "endpoints": {
-            "/process": "POST - Analyze document files",
+            "/process": "POST - Analyze document files with comprehensive summaries",
             "/followup": "POST - Follow-up chat questions",
-            "/health": "GET - Health check",
+            "/health": "GET - Health check with summary quality metrics",
             "/docs": "GET - API documentation"
         },
         "supported_formats": ["PDF", "DOCX"],
-        "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024)
+        "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024),
+        "summary_requirements": "10-12 comprehensive sentences for executive decision-making"
     }
 
 if __name__ == "__main__":
