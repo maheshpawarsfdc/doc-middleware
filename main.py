@@ -274,8 +274,23 @@ Analyze this document for a compliance team in a corporate environment. Focus on
 **Document Type & Classification**
 [Identify: Contract, Resume, NDA, Policy, Agreement, etc.]
 
-**Document Summary**
-[Provide a concise 3-5 sentence executive overview covering: purpose, key parties involved, main terms/conditions, and overall significance]
+**Document Summary (MANDATORY — 10–12 sentences)**
+Provide a high-density, self-contained executive brief that eliminates the need to read the document.  
+
+Your summary MUST clearly state:
+1. Document type and primary purpose.  
+2. All key parties involved (people and organizations) with their roles.  
+3. Main terms, obligations, and conditions.  
+4. All critical dates with their meaning.  
+5. All important monetary amounts with their meaning.  
+6. Any special clauses, benefits, restrictions, or penalties.  
+7. Potential risks or compliance concerns.  
+8. Any deadlines or renewal requirements.  
+9. Missing information or ambiguities worth noting.  
+10. A one-line “overall significance” conclusion.  
+
+Write in complete sentences, easy for a business executive to read quickly.  
+Do **not** omit details — the reader should feel they fully understand the document without opening it.
 
 **Key Information Extracted**
 
