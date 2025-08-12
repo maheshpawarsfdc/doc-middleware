@@ -257,6 +257,9 @@ Focus on business-critical insights, regulatory compliance, and actionable recom
 3. Flag potential compliance issues or business risks
 4. Provide specific, actionable recommendations
 5. Use professional language suitable for business stakeholders
+6. All important dates in the document, along with what they represent.
+7. All important monetary amounts, along with what they represent and their currency if stated.
+
 
 **OUTPUT FORMAT:** Return your analysis in this exact structure with proper line breaks:
 ---
