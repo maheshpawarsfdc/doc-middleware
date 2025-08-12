@@ -406,7 +406,7 @@ async def call_groq_with_retry(prompt: str, request_id: str, max_retries: int = 
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "whisper-large-v3-turbo",
+        "model": "llama-3.3-70b-versatile",
         "messages": [
             {
                 "role": "system", 
