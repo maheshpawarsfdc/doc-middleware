@@ -49,7 +49,7 @@ def create_requests_session():
     session = requests.Session()
     retry_strategy = Retry(
         total=3,
-        backoff_factor=2,  # Increased backoff
+        backoff_factor=2,
         status_forcelist=[429, 500, 502, 503, 504],
         respect_retry_after_header=True
     )
@@ -78,9 +78,9 @@ class FollowupPayload(BaseModel):
 # ----------------------------
 # Configuration
 # ----------------------------
-MAX_TEXT_LENGTH = 80000  # Reduced to prevent token overflow
-GROQ_TIMEOUT = 90  # Increased timeout
-MAX_FILE_SIZE = 15 * 1024 * 1024  # 15MB limit
+MAX_TEXT_LENGTH = 80000
+GROQ_TIMEOUT = 90
+MAX_FILE_SIZE = 15 * 1024 * 1024
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2
 
@@ -106,7 +106,7 @@ async def general_exception_handler(request, exc):
     }
 
 # ----------------------------
-# /process Endpoint - IMPROVED
+# /process Endpoint
 # ----------------------------
 @app.post("/process")
 async def process_file(input: FileInput):
@@ -150,8 +150,8 @@ async def process_file(input: FileInput):
         
         logger.info(f"[{request_id}] 📄 Extracted {len(extracted_text)} characters of text")
 
-        # Build the prompt
-        base_prompt = build_analysis_prompt(extracted_text)
+        # Build the ENHANCED prompt
+        base_prompt = build_enhanced_analysis_prompt(extracted_text)
         final_prompt = (
             input.customPrompt.strip() + "\n\n" + base_prompt
             if input.customPrompt else base_prompt
@@ -175,7 +175,7 @@ async def process_file(input: FileInput):
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 # ----------------------------
-# Text Extraction Function - IMPROVED
+# Text Extraction Function
 # ----------------------------
 async def extract_text_from_file(filename: str, binary: bytes, request_id: str) -> str:
     """Extract text from PDF or DOCX files with improved error handling"""
@@ -242,27 +242,35 @@ async def extract_text_from_file(filename: str, binary: bytes, request_id: str) 
     return extracted_text.strip()
 
 # ----------------------------
-# Prompt Building Function - SAME AS BEFORE
+# ENHANCED Prompt Building Function
 # ----------------------------
-def build_analysis_prompt(extracted_text: str) -> str:
-    """Build the analysis prompt with the extracted text"""
+def build_enhanced_analysis_prompt(extracted_text: str) -> str:
+    """Build the enhanced analysis prompt with stricter formatting requirements"""
     return f"""
 You are an expert legal and business document analysis assistant specialized in HR, Sales, and Legal document review.
-**DOCUMENT CONTEXT:** Analyze this document as if you are reviewing it for a compliance team in a corporate environment. 
-Focus on business-critical insights, regulatory compliance, and actionable recommendations, review everything and make a summary of everything that are the main/important things.
+
+**CRITICAL FORMATTING RULES - MUST BE FOLLOWED EXACTLY:**
+
+1. **FOR DATES:** You MUST provide context for EVERY date. NEVER list raw dates.
+   ❌ WRONG: "- January 15, 2024"
+   ✅ CORRECT: "- Employment Start Date: January 15, 2024"
+   ✅ CORRECT: "- Contract Expiry: January 14, 2026"
+   ✅ CORRECT: "- Birth Date: March 10, 1985"
+
+2. **FOR MONETARY VALUES:** You MUST provide context for EVERY amount. NEVER list raw amounts.
+   ❌ WRONG: "- $185,000"
+   ✅ CORRECT: "- Annual Salary: $185,000"
+   ✅ CORRECT: "- Signing Bonus: $25,000"
+   ✅ CORRECT: "- Hourly Rate: $10.50"
+
+3. **IF CONTEXT IS UNCLEAR:** Use descriptive labels based on document context.
+   Examples: "- Unspecified Payment: $500", "- Document Date: January 10, 2024"
 
 **ANALYSIS INSTRUCTIONS:**
-1. First, identify the document type (contract, resume, NDA, policy, etc.)
-2. Extract key information with high accuracy
-3. Flag potential compliance issues or business risks
-4. Provide specific, actionable recommendations
-5. Use professional language suitable for business stakeholders
-6. All important dates in the document, along with what they represent.
-7. All important monetary amounts, along with what they represent and their currency if stated.
+Analyze this document for a compliance team in a corporate environment. Focus on business-critical insights, regulatory compliance, and actionable recommendations.
 
+**OUTPUT FORMAT - FOLLOW EXACTLY:**
 
-**OUTPUT FORMAT:** Return your analysis in this exact structure with proper line breaks:
----
 **Document Type & Classification**
 [Identify: Contract, Resume, NDA, Policy, Agreement, etc.]
 
@@ -270,28 +278,31 @@ Focus on business-critical insights, regulatory compliance, and actionable recom
 [Provide a concise 3-5 sentence executive overview covering: purpose, key parties involved, main terms/conditions, and overall significance]
 
 **Key Information Extracted**
+
 **People & Roles:**
+[List people with their roles and organizations]
 - [Name] - [Role/Title] - [Organization if mentioned]
 
 **Organizations & Entities:**
+[List organizations and their roles in the document]
 - [Organization Name] - [Type: Company/Agency/etc.] - [Role in document]
 
 **Important Dates:**
-CRITICAL: Every date MUST follow this exact format: "[Label]: [Date]"
-- [Date Label/Context]: [Date] - [Additional significance if any]
-Examples: "Joining Date: 16 Aug 2025", "Contract End Date: 31 Dec 2025", "Notice Period Deadline: 15 Sep 2025"
-DO NOT write dates like "16 Aug 2025" - ALWAYS include the label like "Joining Date: 16 Aug 2025"
+[MANDATORY: Every date MUST have a descriptive label explaining what it represents]
+- [Date Purpose/Label]: [Date] - [Additional context if relevant]
+- [Date Purpose/Label]: [Date] - [Additional context if relevant]
 
 **Monetary Values & Terms:**
-CRITICAL: Every amount MUST follow this exact format: "[Label]: [Currency][Amount]"
-- [Amount Label/Context]: [Currency][Amount] - [Additional details if relevant]
-Examples: "Fixed CTC: ₹1,000,000 annually", "Variable Pay: ₹200,000 (20% of fixed)", "Joining Bonus: ₹100,000 (one-time)"
-DO NOT write amounts like "1000000" - ALWAYS include the label like "Fixed CTC: ₹1,000,000"
+[MANDATORY: Every amount MUST have a descriptive label explaining what it represents]
+- [Amount Purpose/Label]: [Currency][Amount] - [Additional context if relevant]
+- [Amount Purpose/Label]: [Currency][Amount] - [Additional context if relevant]
 
 **Critical Clauses & Terms:**
-- [Brief description of key contractual terms, obligations, or conditions]
+[List key contractual terms, obligations, or conditions]
+- [Brief description of key terms]
 
 **Compliance & Risk Assessment**
+
 **Potential Risks or Red Flags:**
 - [HIGH/MEDIUM/LOW] [Specific risk with brief explanation]
 
@@ -302,6 +313,7 @@ DO NOT write amounts like "1000000" - ALWAYS include the label like "Fixed CTC: 
 - [Any compliance requirements, legal standards, or regulatory issues identified]
 
 **Actionable Recommendations**
+
 **Immediate Actions Required:**
 - [Priority 1 items that need immediate attention]
 
@@ -313,48 +325,35 @@ DO NOT write amounts like "1000000" - ALWAYS include the label like "Fixed CTC: 
 
 **Document Management:**
 - [Filing, renewal dates, or administrative actions needed]
----
 
-**CRITICAL EXTRACTION GUIDELINES:**
+**EXAMPLES OF CORRECT FORMATTING:**
 
-**For Dates:** ALWAYS include the context/label before the date. NEVER list just raw dates.
-- Format: "[Purpose/Label]: [Date] - [Additional context if relevant]"
-- Examples: "Employment Start Date: 1 Jan 2025", "Probation End: 30 Jun 2025", "Annual Review Due: 31 Dec 2025"
-- WRONG: "16 Aug 2025" 
-- CORRECT: "Joining Date: 16 Aug 2025"
+**Important Dates:**
+- Employment Start Date: January 15, 2025
+- Probation Period End: July 15, 2025
+- Annual Review Due: January 15, 2026
+- Contract Expiration: December 31, 2027
 
-**For Monetary Values:** ALWAYS include what the amount represents. NEVER list just raw numbers.
-- Format: "[Purpose/Label]: [Currency][Amount] - [Additional context if relevant]"
-- Examples: "Base Salary: $75,000 annually", "Performance Bonus: $10,000 (quarterly)", "Severance Pay: $25,000 (3 months)"
-- WRONG: "1000000"
-- CORRECT: "Fixed CTC: ₹1,000,000 annually"
+**Monetary Values & Terms:**
+- Base Annual Salary: $185,000
+- Performance Bonus Target: $25,000 (annual)
+- Stock Option Grant: $50,000 (vested over 4 years)
+- Relocation Allowance: $10,000 (one-time)
 
-**For Currency:** Use appropriate currency symbols (₹, $, €, £) based on document context.
-
-**MANDATORY RULES:**
-1. NEVER extract dates or amounts without their contextual labels
-2. If context is unclear, use descriptive labels like "Unspecified Date: [date]" or "Miscellaneous Amount: [amount]"
-3. Every date MUST have a purpose/label explaining what it represents
-4. Every monetary value MUST have a label explaining what it represents
-5. If you cannot determine the context, explicitly state "Context unclear" but still provide a descriptive label
-
-**QUALITY GUIDELINES:**
-- Be specific and avoid generic statements
-- Include confidence levels when uncertain (e.g., "appears to be" for unclear information)
-- Focus on business impact and legal significance
-- Prioritize risks by severity (HIGH/MEDIUM/LOW)
-- Ensure all recommendations are actionable with clear next steps
+**REMEMBER:** 
+- NEVER list raw dates without context
+- NEVER list raw amounts without context  
+- ALWAYS explain what each date and amount represents
+- If you're unsure of context, use descriptive labels like "Unspecified Date" or "Miscellaneous Payment"
 
 **DOCUMENT CONTENT TO ANALYZE:**
 {extracted_text}
 
-**REMINDER: You MUST provide context labels for ALL dates and monetary values. Raw numbers and dates without context are NOT acceptable.**
-
-**End of analysis request.**
+**FINAL REMINDER: Every date and monetary value MUST have a descriptive label. Raw numbers and dates are NOT acceptable.**
 """
 
 # ----------------------------
-# /followup Endpoint - IMPROVED
+# /followup Endpoint
 # ----------------------------
 @app.post("/followup")
 async def followup_chat(payload: FollowupPayload):
@@ -393,7 +392,7 @@ async def followup_chat(payload: FollowupPayload):
         raise HTTPException(status_code=500, detail=f"Follow-up failed: {str(e)}")
 
 # ----------------------------
-# Utility: Single prompt with retry - IMPROVED
+# Utility: Single prompt with retry
 # ----------------------------
 async def call_groq_with_retry(prompt: str, request_id: str, max_retries: int = MAX_RETRIES) -> str:
     """Call Groq API with retry logic and proper error handling"""
@@ -409,10 +408,13 @@ async def call_groq_with_retry(prompt: str, request_id: str, max_retries: int = 
     payload = {
         "model": "llama3-70b-8192",
         "messages": [
-            {"role": "system", "content": "You are a professional document analysis assistant specializing in legal, HR, and business document review."},
+            {
+                "role": "system", 
+                "content": "You are a professional document analysis assistant. You MUST follow formatting instructions exactly. Every date and monetary value MUST have a descriptive label explaining what it represents. NEVER provide raw dates or amounts without context."
+            },
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.2,
+        "temperature": 0.1,  # Lower temperature for more consistent formatting
         "max_tokens": 4000
     }
     
@@ -474,7 +476,7 @@ async def call_groq_with_retry(prompt: str, request_id: str, max_retries: int = 
     )
 
 # ----------------------------
-# Utility: Chat with message history and retry - IMPROVED
+# Utility: Chat with message history and retry
 # ----------------------------
 async def call_groq_messages_with_retry(messages: List[dict], request_id: str, max_retries: int = MAX_RETRIES) -> str:
     """Call Groq API with message history and retry logic"""
@@ -552,7 +554,7 @@ async def call_groq_messages_with_retry(messages: List[dict], request_id: str, m
     )
 
 # ----------------------------
-# Health Check Endpoint - IMPROVED
+# Health Check Endpoint
 # ----------------------------
 @app.get("/health")
 async def health_check():
