@@ -30,9 +30,9 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 FastAPI server starting up...")
     
     # Validate configuration
-    if not os.environ.get('GEMINI_API_KEY'):
-        logger.error("❌ GEMINI_API_KEY environment variable not set!")
-        raise RuntimeError("GEMINI_API_KEY is required")
+    if not os.environ.get('GROQ_API_KEY'):
+        logger.error("❌ GROQ_API_KEY environment variable not set!")
+        raise RuntimeError("GROQ_API_KEY is required")
     
     logger.info("✅ Configuration validated")
     yield
