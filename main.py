@@ -415,7 +415,7 @@ async def call_groq_with_retry(prompt: str, request_id: str, max_retries: int = 
     if not groq_api_key:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
     
-    groq_api_url = "https://api.groq.com/openai/v1/chat/completions"
+    groq_api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
     headers = {
         "Authorization": f"Bearer {groq_api_key}",
         "Content-Type": "application/json"
@@ -499,7 +499,7 @@ async def call_groq_messages_with_retry(messages: List[dict], request_id: str, m
     if not groq_api_key:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
     
-    groq_api_url = "https://api.groq.com/openai/v1/chat/completions"
+    groq_api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
     headers = {
         "Authorization": f"Bearer {groq_api_key}",
         "Content-Type": "application/json"
