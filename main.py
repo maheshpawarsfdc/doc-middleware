@@ -28,9 +28,9 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 FastAPI server starting up...")
     
     # Validate configuration
-    if not os.environ.get('GROQ_API_KEY'):
-        logger.error("❌ GROQ_API_KEY environment variable not set!")
-        raise RuntimeError("GROQ_API_KEY is required")
+    if not os.environ.get('GEMINI_API_KEY'):
+        logger.error("❌ GEMINI_API_KEY environment variable not set!")
+        raise RuntimeError("GEMINI_API_KEY is required")
     
     logger.info("✅ Configuration validated")
     yield
@@ -79,7 +79,7 @@ class FollowupPayload(BaseModel):
 # Configuration
 # ----------------------------
 MAX_TEXT_LENGTH = 80000
-GROQ_TIMEOUT = 90
+GEMINI_TIMEOUT = 90
 MAX_FILE_SIZE = 15 * 1024 * 1024
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 2
@@ -104,6 +104,46 @@ async def general_exception_handler(request, exc):
         "status_code": 500,
         "timestamp": time.time()
     }
+
+# ----------------------------
+# Document Type Detection
+# ----------------------------
+def detect_document_type(extracted_text: str, filename: str) -> str:
+    """Detect document type based on content and filename"""
+    text_lower = extracted_text.lower()
+    filename_lower = filename.lower()
+    
+    # Resume detection
+    resume_keywords = ['resume', 'cv', 'curriculum vitae', 'experience', 'education', 'skills', 'objective', 'summary']
+    if any(keyword in filename_lower for keyword in ['resume', 'cv']) or \
+       sum(1 for keyword in resume_keywords if keyword in text_lower) >= 3:
+        return 'RESUME'
+    
+    # Contract detection
+    contract_keywords = ['agreement', 'contract', 'terms', 'conditions', 'party', 'obligations', 'consideration']
+    if any(keyword in filename_lower for keyword in ['contract', 'agreement']) or \
+       sum(1 for keyword in contract_keywords if keyword in text_lower) >= 4:
+        return 'CONTRACT'
+    
+    # NDA detection
+    nda_keywords = ['confidential', 'non-disclosure', 'proprietary', 'trade secret', 'confidentiality']
+    if any(keyword in filename_lower for keyword in ['nda', 'confidential']) or \
+       sum(1 for keyword in nda_keywords if keyword in text_lower) >= 2:
+        return 'NDA'
+    
+    # Policy detection
+    policy_keywords = ['policy', 'procedure', 'guidelines', 'rules', 'regulations', 'compliance']
+    if any(keyword in filename_lower for keyword in ['policy', 'procedure']) or \
+       sum(1 for keyword in policy_keywords if keyword in text_lower) >= 3:
+        return 'POLICY'
+    
+    # Offer Letter detection
+    offer_keywords = ['offer', 'position', 'salary', 'compensation', 'start date', 'employment']
+    if any(keyword in filename_lower for keyword in ['offer']) or \
+       sum(1 for keyword in offer_keywords if keyword in text_lower) >= 4:
+        return 'OFFER_LETTER'
+    
+    return 'GENERAL_DOCUMENT'
 
 # ----------------------------
 # /process Endpoint
@@ -150,22 +190,27 @@ async def process_file(input: FileInput):
         
         logger.info(f"[{request_id}] 📄 Extracted {len(extracted_text)} characters of text")
 
-        # Build the ENHANCED prompt
-        base_prompt = build_enhanced_analysis_prompt(extracted_text)
+        # Detect document type
+        doc_type = detect_document_type(extracted_text, input.filename)
+        logger.info(f"[{request_id}] 🔍 Detected document type: {doc_type}")
+
+        # Build the ENHANCED prompt based on document type
+        base_prompt = build_enhanced_analysis_prompt(extracted_text, doc_type)
         final_prompt = (
             input.customPrompt.strip() + "\n\n" + base_prompt
             if input.customPrompt else base_prompt
         )
         
-        # Call AI service with proper error handling and retry
-        response = await call_groq_with_retry(final_prompt, request_id)
+        # Call Gemini API with proper error handling and retry
+        response = await call_gemini_with_retry(final_prompt, request_id)
         
         logger.info(f"[{request_id}] ✅ Analysis completed successfully")
         return {
             "insights": response, 
             "status": "success",
             "request_id": request_id,
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "document_type": doc_type
         }
         
     except HTTPException:
@@ -242,392 +287,635 @@ async def extract_text_from_file(filename: str, binary: bytes, request_id: str) 
     return extracted_text.strip()
 
 # ----------------------------
-# ENHANCED Prompt Building Function
+# ENHANCED Document-Type-Specific Prompt Building
 # ----------------------------
-def build_enhanced_analysis_prompt(extracted_text: str) -> str:
-    """Build the enhanced analysis prompt with stricter formatting requirements"""
-    return f"""
-You are an expert legal and business document analysis assistant specialized in HR, Sales, and Legal document review.
-
+def build_enhanced_analysis_prompt(extracted_text: str, doc_type: str) -> str:
+    """Build document-type specific analysis prompts"""
+    
+    # Common formatting rules
+    formatting_rules = """
 **CRITICAL FORMATTING RULES - MUST BE FOLLOWED EXACTLY:**
 
 1. **FOR DATES:** You MUST provide context for EVERY date. NEVER list raw dates.
    ❌ WRONG: "- January 15, 2024"
    ✅ CORRECT: "- Employment Start Date: January 15, 2024"
-   ✅ CORRECT: "- Contract Expiry: January 14, 2026"
-   ✅ CORRECT: "- Birth Date: March 10, 1985"
 
 2. **FOR MONETARY VALUES:** You MUST provide context for EVERY amount. NEVER list raw amounts.
    ❌ WRONG: "- $185,000"
    ✅ CORRECT: "- Annual Salary: $185,000"
-   ✅ CORRECT: "- Signing Bonus: $25,000"
-   ✅ CORRECT: "- Hourly Rate: $10.50"
 
 3. **IF CONTEXT IS UNCLEAR:** Use descriptive labels based on document context.
-   Examples: "- Unspecified Payment: $500", "- Document Date: January 10, 2024"
+"""
 
-**ANALYSIS INSTRUCTIONS:**
-Analyze this document for a compliance team in a corporate environment. Focus on business-critical insights, regulatory compliance, and actionable recommendations.
+    if doc_type == 'RESUME':
+        return f"""
+You are an expert HR recruitment specialist analyzing resumes for talent acquisition.
+
+{formatting_rules}
+
+**RESUME ANALYSIS INSTRUCTIONS:**
+Analyze this resume for an HR team evaluating candidate fit, experience relevance, and potential red flags.
 
 **OUTPUT FORMAT - FOLLOW EXACTLY:**
 
 **Document Type & Classification**
-[Identify: Contract, Resume, NDA, Policy, Agreement, etc.]
+Resume/CV Analysis
 
 **Document Summary (MANDATORY — 10–12 sentences)**
-Provide a high-density, self-contained executive brief that eliminates the need to read the document.  
+Provide a comprehensive candidate overview that eliminates the need to read the full resume.
 
 Your summary MUST clearly state:
-1. Document type and primary purpose.  
-2. All key parties involved (people and organizations) with their roles.  
-3. Main terms, obligations, and conditions.  
-4. All critical dates with their meaning.  
-5. All important monetary amounts with their meaning.  
-6. Any special clauses, benefits, restrictions, or penalties.  
-7. Potential risks or compliance concerns.  
-8. Any deadlines or renewal requirements.  
-9. Missing information or ambiguities worth noting.  
-10. A one-line “overall significance” conclusion.  
-
-Write in complete sentences, easy for a business executive to read quickly.  
-Do **not** omit details — the reader should feel they fully understand the document without opening it.
+1. Candidate's name, current/most recent role, and years of experience
+2. Educational background and key qualifications
+3. Core technical skills and competencies
+4. Industry experience and domain expertise
+5. Career progression and growth trajectory
+6. Notable achievements, certifications, or awards
+7. Employment gaps or career transitions (if any)
+8. Salary expectations or current compensation (if mentioned)
+9. Location, visa status, or relocation requirements
+10. Overall candidate strength assessment and recommended next steps
 
 **Key Information Extracted**
 
-**People & Roles:**
-[List people with their roles and organizations]
-- [Name] - [Role/Title] - [Organization if mentioned]
+**Candidate Profile:**
+- Full Name: [Name]
+- Current Role: [Title] at [Company]
+- Total Experience: [X years in Y domain]
+- Location: [City, State/Country]
+- Contact: [Email, Phone if provided]
 
-**Organizations & Entities:**
-[List organizations and their roles in the document]
-- [Organization Name] - [Type: Company/Agency/etc.] - [Role in document]
+**Education & Certifications:**
+- Highest Degree: [Degree] from [Institution] - [Graduation Year]
+- Professional Certifications: [List with dates]
+- Relevant Training: [Technical or professional development]
 
-**Important Dates:**
-[MANDATORY: Every date MUST have a descriptive label explaining what it represents]
-- [Date Purpose/Label]: [Date] - [Additional context if relevant]
-- [Date Purpose/Label]: [Date] - [Additional context if relevant]
+**Technical Skills:**
+- Programming Languages: [If applicable]
+- Software/Tools: [Professional tools, platforms]
+- Industry Knowledge: [Domain-specific expertise]
 
-**Monetary Values & Terms:**
-[MANDATORY: Every amount MUST have a descriptive label explaining what it represents]
-- [Amount Purpose/Label]: [Currency][Amount] - [Additional context if relevant]
-- [Amount Purpose/Label]: [Currency][Amount] - [Additional context if relevant]
+**Experience Timeline:**
+[For each role, format as:]
+- Role Duration: [Start Date] to [End Date] ([X months/years])
+- Position: [Job Title] at [Company Name]
+- Key Responsibilities: [Brief summary]
 
-**Critical Clauses & Terms:**
-[List key contractual terms, obligations, or conditions]
-- [Brief description of key terms]
+**Employment Analysis:**
+- Career Progression: [Upward/lateral/mixed]
+- Employment Gaps: [Any gaps > 6 months with explanation if provided]
+- Job Stability: [Average tenure per role]
+- Industry Focus: [Consistent/diverse sectors]
+
+**Compensation Information:**
+- Current/Expected Salary: [If mentioned]
+- Previous Compensation: [If historical data available]
+- Benefits Expectations: [If specified]
 
 **Compliance & Risk Assessment**
 
-**Potential Risks or Red Flags:**
-- [HIGH/MEDIUM/LOW] [Specific risk with brief explanation]
+**Potential Red Flags:**
+- [HIGH/MEDIUM/LOW] Employment gaps without explanation
+- [HIGH/MEDIUM/LOW] Frequent job changes (< 1 year tenure)
+- [HIGH/MEDIUM/LOW] Inconsistent career progression
+- [HIGH/MEDIUM/LOW] Missing contact information
+- [HIGH/MEDIUM/LOW] Overqualification for target role
+- [HIGH/MEDIUM/LOW] Skills mismatch with requirements
 
 **Missing or Unclear Elements:**
-- [Items that should be present but are missing or ambiguous]
+- [Items typically expected on resumes but absent]
+- [Incomplete employment dates]
+- [Vague job descriptions or achievements]
+
+**Verification Requirements:**
+- [Education verification needed]
+- [Employment verification priorities]
+- [Professional references status]
+
+**Actionable Recommendations**
+
+**Interview Focus Areas:**
+- [Key technical areas to assess]
+- [Behavioral questions to explore]
+- [Career transition explanations needed]
+
+**Next Steps:**
+- [Recommend phone screen/technical interview/skip]
+- [Salary negotiation considerations]
+- [Reference check priorities]
+- [Additional documentation needed]
+
+**Stakeholder Actions:**
+- [Hiring manager review requirements]
+- [Technical team assessment needs]
+- [HR follow-up items]
+
+**DOCUMENT CONTENT TO ANALYZE:**
+{extracted_text}
+"""
+
+    elif doc_type == 'CONTRACT':
+        return f"""
+You are an expert legal and business contracts analyst specializing in commercial agreements.
+
+{formatting_rules}
+
+**CONTRACT ANALYSIS INSTRUCTIONS:**
+Analyze this contract for a legal/business team reviewing terms, obligations, risks, and compliance requirements.
+
+**OUTPUT FORMAT - FOLLOW EXACTLY:**
+
+**Document Type & Classification**
+[Contract Type: Service Agreement/Purchase Agreement/Employment Contract/etc.]
+
+**Document Summary (MANDATORY — 10–12 sentences)**
+Provide a comprehensive contract overview for executive review.
+
+Your summary MUST clearly state:
+1. Contract type, purpose, and primary business objective
+2. All contracting parties with their roles and legal entities
+3. Contract value, payment terms, and financial obligations
+4. Key deliverables, services, or products covered
+5. Contract duration, start/end dates, and renewal terms
+6. Critical deadlines, milestones, or performance requirements
+7. Liability limitations, indemnification, and risk allocation
+8. Termination conditions and notice requirements
+9. Governing law, dispute resolution mechanisms
+10. Overall risk assessment and recommended actions
+
+**Key Information Extracted**
+
+**Contracting Parties:**
+- Primary Party: [Company Name] - [Role: Buyer/Seller/Service Provider]
+- Secondary Party: [Company Name] - [Role and legal status]
+- Authorized Signatories: [Names and titles]
+
+**Financial Terms:**
+- Contract Value: [Total amount with currency]
+- Payment Schedule: [Due dates and amounts]
+- Late Payment Penalties: [Fees and interest rates]
+- Expense Responsibilities: [Who pays what]
+
+**Performance Obligations:**
+- Primary Deliverables: [Services, products, or outcomes]
+- Quality Standards: [Acceptance criteria and SLAs]
+- Timeline Requirements: [Key milestones and deadlines]
+- Performance Metrics: [How success is measured]
+
+**Important Dates:**
+- Contract Effective Date: [Start date]
+- Performance Period: [Duration of obligations]
+- Key Milestone Dates: [Critical deadlines]
+- Contract Expiration: [End date]
+- Renewal Deadline: [Notice required by date]
+
+**Risk & Liability Terms:**
+- Liability Caps: [Maximum exposure amounts]
+- Indemnification Scope: [What's covered]
+- Insurance Requirements: [Types and amounts]
+- Force Majeure Provisions: [Covered events]
+
+**Compliance & Risk Assessment**
+
+**Contract Risks:**
+- [HIGH/MEDIUM/LOW] Unlimited liability exposure
+- [HIGH/MEDIUM/LOW] Aggressive penalty terms
+- [HIGH/MEDIUM/LOW] Unclear deliverable definitions
+- [HIGH/MEDIUM/LOW] Insufficient termination protection
+- [HIGH/MEDIUM/LOW] Missing governing law clauses
+- [HIGH/MEDIUM/LOW] Inadequate intellectual property terms
+
+**Missing Critical Clauses:**
+- [Standard clauses that should be present but aren't]
+- [Industry-specific requirements not addressed]
+- [Regulatory compliance terms missing]
 
 **Regulatory Considerations:**
-- [Any compliance requirements, legal standards, or regulatory issues identified]
+- [Industry regulations that apply]
+- [Compliance requirements identified]
+- [Data protection and privacy obligations]
 
 **Actionable Recommendations**
 
 **Immediate Actions Required:**
-- [Priority 1 items that need immediate attention]
+- [Contract terms requiring negotiation]
+- [Legal review priorities]
+- [Approval workflow requirements]
 
-**Follow-up Actions:**
-- [Items to address within specific timeframes]
+**Risk Mitigation Steps:**
+- [Recommended contract amendments]
+- [Additional protections needed]
+- [Insurance verification requirements]
 
-**Stakeholder Notifications:**
-- [Who should be informed about this document and why]
-
-**Document Management:**
-- [Filing, renewal dates, or administrative actions needed]
-
-**EXAMPLES OF CORRECT FORMATTING:**
-
-**Important Dates:**
-- Employment Start Date: January 15, 2025
-- Probation Period End: July 15, 2025
-- Annual Review Due: January 15, 2026
-- Contract Expiration: December 31, 2027
-
-**Monetary Values & Terms:**
-- Base Annual Salary: $185,000
-- Performance Bonus Target: $25,000 (annual)
-- Stock Option Grant: $50,000 (vested over 4 years)
-- Relocation Allowance: $10,000 (one-time)
-
-**REMEMBER:** 
-- NEVER list raw dates without context
-- NEVER list raw amounts without context  
-- ALWAYS explain what each date and amount represents
-- If you're unsure of context, use descriptive labels like "Unspecified Date" or "Miscellaneous Payment"
+**Ongoing Management:**
+- [Performance monitoring requirements]
+- [Renewal timeline and considerations]
+- [Compliance tracking needs]
 
 **DOCUMENT CONTENT TO ANALYZE:**
 {extracted_text}
-
-**FINAL REMINDER: Every date and monetary value MUST have a descriptive label. Raw numbers and dates are NOT acceptable.**
 """
 
-# ----------------------------
-# /followup Endpoint
-# ----------------------------
-@app.post("/followup")
-async def followup_chat(payload: FollowupPayload):
-    request_id = str(int(time.time() * 1000))
-    logger.info(f"[{request_id}] 💬 Processing follow-up chat")
-    
-    try:
-        if not payload.messages:
-            raise HTTPException(status_code=400, detail="No messages provided")
-        
-        # Validate messages
-        valid_messages = []
-        for msg in payload.messages:
-            if msg.role and msg.content:
-                valid_messages.append(msg.dict())
-            else:
-                logger.warning(f"[{request_id}] Skipping invalid message: {msg}")
-        
-        if not valid_messages:
-            raise HTTPException(status_code=400, detail="No valid messages found")
-        
-        response = await call_groq_messages_with_retry(valid_messages, request_id)
-        logger.info(f"[{request_id}] ✅ Follow-up completed successfully")
-        
-        return {
-            "reply": response, 
-            "status": "success",
-            "request_id": request_id,
-            "timestamp": time.time()
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[{request_id}] ❌ Follow-up error: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Follow-up failed: {str(e)}")
+    elif doc_type == 'NDA':
+        return f"""
+You are an expert legal counsel specializing in confidentiality and non-disclosure agreements.
 
-# ----------------------------
-# Utility: Single prompt with retry
-# ----------------------------
-async def call_groq_with_retry(prompt: str, request_id: str, max_retries: int = MAX_RETRIES) -> str:
-    """Call Groq API with retry logic and proper error handling"""
-    groq_api_key = os.environ.get('GROQ_API_KEY')
-    if not groq_api_key:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
-    
-    groq_api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-    headers = {
-        "Authorization": f"Bearer {groq_api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {
-                "role": "system", 
-                "content": "You are a professional document analysis assistant. You MUST follow formatting instructions exactly. Every date and monetary value MUST have a descriptive label explaining what it represents. NEVER provide raw dates or amounts without context."
-            },
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.1,  # Lower temperature for more consistent formatting
-        "max_tokens": 4000
-    }
-    
-    last_error = None
-    
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"[{request_id}] 🤖 Calling Groq API (attempt {attempt + 1}/{max_retries})")
-            
-            response = requests_session.post(
-                groq_api_url, 
-                headers=headers, 
-                json=payload,
-                timeout=GROQ_TIMEOUT
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                content = result["choices"][0]["message"]["content"]
-                logger.info(f"[{request_id}] ✅ Groq API successful, response length: {len(content)} chars")
-                return content
-            
-            elif response.status_code == 429:  # Rate limit
-                retry_after = response.headers.get('retry-after', INITIAL_RETRY_DELAY * (2 ** attempt))
-                logger.warning(f"[{request_id}] ⏰ Rate limited, waiting {retry_after}s")
-                await asyncio.sleep(float(retry_after))
-                continue
-                
-            elif response.status_code in [500, 502, 503, 504]:  # Server errors
-                logger.warning(f"[{request_id}] 🔄 Server error {response.status_code}, retrying...")
-                await asyncio.sleep(INITIAL_RETRY_DELAY * (2 ** attempt))
-                continue
-                
-            else:
-                error_msg = f"Groq API error {response.status_code}: {response.text}"
-                logger.error(f"[{request_id}] ❌ {error_msg}")
-                last_error = error_msg
-                break
-                    
-        except requests.exceptions.Timeout:
-            logger.error(f"[{request_id}] ⏰ Groq API timeout on attempt {attempt + 1}")
-            last_error = "AI service timeout"
-            await asyncio.sleep(INITIAL_RETRY_DELAY * (2 ** attempt))
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[{request_id}] 🌐 Network error on attempt {attempt + 1}: {str(e)}")
-            last_error = f"Network error: {str(e)}"
-            await asyncio.sleep(INITIAL_RETRY_DELAY * (2 ** attempt))
-            
-        except Exception as e:
-            logger.error(f"[{request_id}] ❌ Unexpected error on attempt {attempt + 1}: {str(e)}")
-            last_error = f"AI service error: {str(e)}"
-            await asyncio.sleep(INITIAL_RETRY_DELAY * (2 ** attempt))
-    
-    # All retries failed
-    raise HTTPException(
-        status_code=503, 
-        detail=f"AI service unavailable after {max_retries} attempts. Last error: {last_error}"
-    )
+{formatting_rules}
 
-# ----------------------------
-# Utility: Chat with message history and retry
-# ----------------------------
-async def call_groq_messages_with_retry(messages: List[dict], request_id: str, max_retries: int = MAX_RETRIES) -> str:
-    """Call Groq API with message history and retry logic"""
-    groq_api_key = os.environ.get('GROQ_API_KEY')
-    if not groq_api_key:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
-    
-    groq_api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-    headers = {
-        "Authorization": f"Bearer {groq_api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "llama3-70b-8192",
-        "messages": messages,
-        "temperature": 0.2,
-        "max_tokens": 4000
-    }
-    
-    last_error = None
-    
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"[{request_id}] 💬 Calling Groq chat API (attempt {attempt + 1}/{max_retries})")
-            
-            response = requests_session.post(
-                groq_api_url, 
-                headers=headers, 
-                json=payload,
-                timeout=GROQ_TIMEOUT
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                content = result["choices"][0]["message"]["content"]
-                logger.info(f"[{request_id}] ✅ Chat API successful")
-                return content
-                
-            elif response.status_code == 429:  # Rate limit
-                retry_after = response.headers.get('retry-after', INITIAL_RETRY_DELAY * (2 ** attempt))
-                logger.warning(f"[{request_id}] ⏰ Chat rate limited, waiting {retry_after}s")
-                await asyncio.sleep(float(retry_after))
-                continue
-                
-            elif response.status_code in [500, 502, 503, 504]:  # Server errors
-                logger.warning(f"[{request_id}] 🔄 Chat server error {response.status_code}, retrying...")
-                await asyncio.sleep(INITIAL_RETRY_DELAY * (2 ** attempt))
-                continue
-                
-            else:
-                error_msg = f"Chat API error {response.status_code}: {response.text}"
-                logger.error(f"[{request_id}] ❌ {error_msg}")
-                last_error = error_msg
-                break
-                
-        except requests.exceptions.Timeout:
-            logger.error(f"[{request_id}] ⏰ Chat API timeout on attempt {attempt + 1}")
-            last_error = "Chat service timeout"
-            await asyncio.sleep(INITIAL_RETRY_DELAY * (2 ** attempt))
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[{request_id}] 🌐 Chat network error on attempt {attempt + 1}: {str(e)}")
-            last_error = f"Network error: {str(e)}"
-            await asyncio.sleep(INITIAL_RETRY_DELAY * (2 ** attempt))
-            
-        except Exception as e:
-            logger.error(f"[{request_id}] ❌ Chat unexpected error on attempt {attempt + 1}: {str(e)}")
-            last_error = f"Chat service error: {str(e)}"
-            await asyncio.sleep(INITIAL_RETRY_DELAY * (2 ** attempt))
-    
-    # All retries failed
-    raise HTTPException(
-        status_code=503, 
-        detail=f"Chat service unavailable after {max_retries} attempts. Last error: {last_error}"
-    )
+**NDA ANALYSIS INSTRUCTIONS:**
+Analyze this NDA for a legal team reviewing confidentiality terms, scope, and enforceability.
 
-# ----------------------------
-# Health Check Endpoint
-# ----------------------------
-@app.get("/health")
-async def health_check():
-    """Comprehensive health check endpoint"""
-    health_status = {
-        "status": "healthy",
-        "timestamp": time.time(),
-        "version": "2.0.0",
-        "groq_api_configured": bool(os.environ.get('GROQ_API_KEY')),
-        "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024),
-        "max_text_length": MAX_TEXT_LENGTH,
-        "timeout_seconds": GROQ_TIMEOUT
-    }
-    
-    # Test Groq API connectivity (optional)
-    try:
-        groq_api_key = os.environ.get('GROQ_API_KEY')
-        if groq_api_key:
-            test_response = requests.get(
-                "https://api.groq.com/openai/v1/models",
-                headers={"Authorization": f"Bearer {groq_api_key}"},
-                timeout=5
-            )
-            health_status["groq_api_accessible"] = test_response.status_code == 200
-        else:
-            health_status["groq_api_accessible"] = False
-    except Exception as e:
-        logger.warning(f"Health check API test failed: {str(e)}")
-        health_status["groq_api_accessible"] = False
-    
-    return health_status
+**OUTPUT FORMAT - FOLLOW EXACTLY:**
 
-# ----------------------------
-# Info Endpoint
-# ----------------------------
-@app.get("/")
-async def root():
-    """API information endpoint"""
-    return {
-        "name": "Document Analysis Middleware",
-        "version": "2.0.0",
-        "description": "FastAPI middleware for document analysis using AI",
-        "endpoints": {
-            "/process": "POST - Analyze document files",
-            "/followup": "POST - Follow-up chat questions",
-            "/health": "GET - Health check",
-            "/docs": "GET - API documentation"
-        },
-        "supported_formats": ["PDF", "DOCX"],
-        "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024)
-    }
+**Document Type & Classification**
+Non-Disclosure Agreement (NDA) / Confidentiality Agreement
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=8000,
-        log_level="info",
-        access_log=True
-    )
+**Document Summary (MANDATORY — 10–12 sentences)**
+Provide a comprehensive NDA overview for legal and business teams.
+
+Your summary MUST clearly state:
+1. NDA type (mutual/unilateral) and primary business context
+2. All parties bound by confidentiality obligations
+3. Definition and scope of confidential information covered
+4. Permitted uses and restrictions on confidential information
+5. Duration of confidentiality obligations and survival terms
+6. Geographic scope and applicable jurisdictions
+7. Exceptions to confidentiality (public domain, prior knowledge, etc.)
+8. Return or destruction requirements for confidential materials
+9. Remedies for breach including injunctive relief provisions
+10. Overall enforceability assessment and risk evaluation
+
+**Key Information Extracted**
+
+**NDA Parties:**
+- Disclosing Party: [Company/Individual Name and Role]
+- Receiving Party: [Company/Individual Name and Role]
+- NDA Type: [Mutual/Unilateral/Multilateral]
+
+**Confidentiality Scope:**
+- Information Definition: [What constitutes confidential information]
+- Marking Requirements: [How confidential info must be identified]
+- Oral Information: [How verbal disclosures are handled]
+- Third Party Information: [Treatment of others' confidential data]
+
+**Permitted Uses:**
+- Authorized Purposes: [What receiving party can do with info]
+- Internal Distribution: [Who within organization can access]
+- Employee Obligations: [How employees are bound]
+
+**Important Dates:**
+- NDA Effective Date: [When obligations begin]
+- Confidentiality Period: [How long obligations last]
+- Information Return Deadline: [When materials must be returned]
+- NDA Expiration: [When agreement terminates]
+
+**Restrictions & Obligations:**
+- Use Limitations: [What receiving party cannot do]
+- Security Requirements: [How information must be protected]
+- Disclosure Restrictions: [Who information cannot be shared with]
+- Notification Requirements: [Breach reporting obligations]
+
+**Compliance & Risk Assessment**
+
+**NDA Risks:**
+- [HIGH/MEDIUM/LOW] Overly broad confidentiality definition
+- [HIGH/MEDIUM/LOW] Indefinite confidentiality period
+- [HIGH/MEDIUM/LOW] Unclear permitted use scope
+- [HIGH/MEDIUM/LOW] Weak enforcement mechanisms
+- [HIGH/MEDIUM/LOW] Missing return/destruction requirements
+- [HIGH/MEDIUM/LOW] Inadequate exception clauses
+
+**Enforceability Issues:**
+- [Geographic scope enforceability concerns]
+- [Duration reasonableness assessment]
+- [Definition clarity and specificity]
+- [Consideration adequacy]
+
+**Legal Compliance:**
+- [Jurisdiction-specific requirements]
+- [Industry regulation considerations]
+- [International data transfer implications]
+
+**Actionable Recommendations**
+
+**Immediate Legal Actions:**
+- [Terms requiring clarification or amendment]
+- [Missing standard NDA provisions to add]
+- [Negotiation priorities for business protection]
+
+**Risk Management:**
+- [Information handling process improvements]
+- [Employee training requirements]
+- [Monitoring and compliance procedures]
+
+**Business Operations:**
+- [Information sharing guidelines needed]
+- [Documentation and tracking systems]
+- [Breach response procedures]
+
+**DOCUMENT CONTENT TO ANALYZE:**
+{extracted_text}
+"""
+
+    elif doc_type == 'OFFER_LETTER':
+        return f"""
+You are an expert HR specialist analyzing employment offer letters for completeness and compliance.
+
+{formatting_rules}
+
+**OFFER LETTER ANALYSIS INSTRUCTIONS:**
+Analyze this offer letter for HR teams reviewing employment terms, compliance, and completeness.
+
+**OUTPUT FORMAT - FOLLOW EXACTLY:**
+
+**Document Type & Classification**
+Employment Offer Letter
+
+**Document Summary (MANDATORY — 10–12 sentences)**
+Provide a comprehensive offer analysis for HR and hiring managers.
+
+Your summary MUST clearly state:
+1. Candidate name, offered position, and reporting structure
+2. Compensation package details (salary, bonus, equity, benefits)
+3. Employment start date and location requirements
+4. Employment type (full-time/part-time, exempt/non-exempt status)
+5. Key terms and conditions of employment
+6. Probationary period and performance evaluation timeline
+7. Confidentiality, non-compete, or other restrictive covenants
+8. Offer acceptance deadline and next steps required
+9. Benefits eligibility and enrollment information
+10. Compliance with employment laws and company policies
+
+**Key Information Extracted**
+
+**Candidate & Position:**
+- Candidate Name: [Full name]
+- Position Title: [Job title and level]
+- Department: [Organizational unit]
+- Reporting Manager: [Direct supervisor name and title]
+- Employment Type: [Full-time/Part-time, Exempt/Non-exempt]
+
+**Compensation Package:**
+- Base Salary: [Annual/hourly rate]
+- Bonus Eligibility: [Performance/signing bonus details]
+- Equity Compensation: [Stock options, RSUs, vesting schedule]
+- Commission Structure: [If applicable]
+
+**Important Dates:**
+- Offer Issue Date: [When offer was extended]
+- Response Deadline: [Acceptance deadline]
+- Employment Start Date: [First day of work]
+- Probation Period End: [If applicable]
+- First Performance Review: [Scheduled evaluation date]
+
+**Benefits & Perquisites:**
+- Health Insurance: [Coverage effective date and options]
+- Retirement Benefits: [401k, pension, vesting details]
+- Paid Time Off: [Vacation, sick leave, personal days]
+- Professional Development: [Training, education allowances]
+- Other Benefits: [Specific perks or allowances]
+
+**Employment Terms:**
+- Work Location: [Office, remote, hybrid requirements]
+- Work Schedule: [Hours, flexibility arrangements]
+- Travel Requirements: [Expected travel percentage]
+- At-Will Employment: [Employment relationship terms]
+
+**Compliance & Risk Assessment**
+
+**Employment Law Compliance:**
+- [HIGH/MEDIUM/LOW] Fair Labor Standards Act compliance
+- [HIGH/MEDIUM/LOW] Equal employment opportunity compliance
+- [HIGH/MEDIUM/LOW] State wage and hour law adherence
+- [HIGH/MEDIUM/LOW] Immigration compliance (I-9 requirements)
+- [HIGH/MEDIUM/LOW] Background check and drug testing clarity
+
+**Missing Standard Elements:**
+- [Required disclosures not present]
+- [Standard benefits not mentioned]
+- [Typical employment terms absent]
+- [Legal compliance statements missing]
+
+**Risk Areas:**
+- [Unclear compensation terms]
+- [Missing confidentiality agreements]
+- [Incomplete benefits information]
+- [Vague performance expectations]
+
+**Actionable Recommendations**
+
+**Before Candidate Acceptance:**
+- [Clarifications needed in offer terms]
+- [Additional documentation to provide]
+- [Legal review requirements]
+- [Approval workflow completion]
+
+**Post-Acceptance Actions:**
+- [Onboarding documentation needed]
+- [Background check and verification steps]
+- [Benefits enrollment coordination]
+- [Equipment and access provisioning]
+
+**HR Process Improvements:**
+- [Template updates recommended]
+- [Compliance verification steps]
+- [Manager communication requirements]
+- [Documentation and filing needs]
+
+**DOCUMENT CONTENT TO ANALYZE:**
+{extracted_text}
+"""
+
+    elif doc_type == 'POLICY':
+        return f"""
+You are an expert compliance and policy analyst reviewing organizational policies and procedures.
+
+{formatting_rules}
+
+**POLICY ANALYSIS INSTRUCTIONS:**
+Analyze this policy document for a compliance team reviewing policy effectiveness, gaps, and regulatory alignment.
+
+**OUTPUT FORMAT - FOLLOW EXACTLY:**
+
+**Document Type & Classification**
+[Policy Type: HR Policy/IT Policy/Safety Policy/Compliance Policy/etc.]
+
+**Document Summary (MANDATORY — 10–12 sentences)**
+Provide a comprehensive policy overview for compliance and management teams.
+
+Your summary MUST clearly state:
+1. Policy name, scope, and primary regulatory/business purpose
+2. Affected employee populations and organizational units
+3. Key policy requirements and mandatory procedures
+4. Prohibited behaviors and activities clearly defined
+5. Compliance monitoring and enforcement mechanisms
+6. Training requirements and awareness programs
+7. Reporting procedures and escalation paths
+8. Policy review schedule and update responsibilities
+9. Regulatory alignment and legal compliance status
+10. Implementation gaps and recommended improvements
+
+**Key Information Extracted**
+
+**Policy Details:**
+- Policy Title: [Official policy name]
+- Policy Number: [Document identifier if present]
+- Effective Date: [When policy becomes active]
+- Review Schedule: [How often policy is reviewed]
+- Policy Owner: [Department or individual responsible]
+
+**Scope & Coverage:**
+- Applicable Employees: [Who must follow this policy]
+- Geographic Scope: [Locations where policy applies]
+- Exceptions: [Any groups or situations excluded]
+- Related Policies: [Connected or dependent policies]
+
+**Key Requirements:**
+- Mandatory Actions: [What employees must do]
+- Prohibited Activities: [What is not allowed]
+- Approval Requirements: [Who must authorize what]
+- Documentation Standards: [Required record keeping]
+
+**Important Dates:**
+- Policy Effective Date: [Implementation date]
+- Next Review Date: [Scheduled policy review]
+- Training Completion Deadline: [Employee training requirements]
+- Compliance Reporting Due: [Regular reporting schedule]
+
+**Compliance Framework:**
+- Regulatory Basis: [Laws, regulations, or standards addressed]
+- Monitoring Procedures: [How compliance is measured]
+- Audit Requirements: [Internal/external audit procedures]
+- Violation Consequences: [Disciplinary actions for non-compliance]
+
+**Compliance & Risk Assessment**
+
+**Policy Gaps & Risks:**
+- [HIGH/MEDIUM/LOW] Unclear procedure definitions
+- [HIGH/MEDIUM/LOW] Missing enforcement mechanisms
+- [HIGH/MEDIUM/LOW] Inadequate training requirements
+- [HIGH/MEDIUM/LOW] Weak monitoring procedures
+- [HIGH/MEDIUM/LOW] Outdated regulatory references
+- [HIGH/MEDIUM/LOW] Insufficient escalation procedures
+
+**Regulatory Alignment:**
+- [Current regulatory requirements covered]
+- [Compliance gaps identified]
+- [Industry best practices comparison]
+- [Legal risk assessment]
+
+**Implementation Challenges:**
+- [Resource requirements for compliance]
+- [Training and communication needs]
+- [Technology or system dependencies]
+- [Cultural or behavioral change requirements]
+
+**Actionable Recommendations**
+
+**Immediate Policy Updates:**
+- [Critical gaps requiring immediate attention]
+- [Regulatory compliance updates needed]
+- [Clarifications required for better understanding]
+
+**Implementation Improvements:**
+- [Enhanced training program development]
+- [Better monitoring and reporting systems]
+- [Improved communication strategies]
+- [Technology solutions for compliance tracking]
+
+**Ongoing Management:**
+- [Regular review and update procedures]
+- [Performance metrics and KPIs to track]
+- [Stakeholder engagement requirements]
+- [Continuous improvement processes]
+
+**DOCUMENT CONTENT TO ANALYZE:**
+{extracted_text}
+"""
+
+    else:  # GENERAL_DOCUMENT
+        return f"""
+You are an expert document analysis assistant specialized in business document review.
+
+{formatting_rules}
+
+**GENERAL DOCUMENT ANALYSIS INSTRUCTIONS:**
+Analyze this document for a business team reviewing content for key information, risks, and actionable insights.
+
+**OUTPUT FORMAT - FOLLOW EXACTLY:**
+
+**Document Type & Classification**
+[Document Type: Report/Memo/Proposal/Agreement/Letter/etc.]
+
+**Document Summary (MANDATORY — 10–12 sentences)**
+Provide a comprehensive document overview that eliminates the need to read the full document.
+
+Your summary MUST clearly state:
+1. Document type, purpose, and primary business objective
+2. Key parties, stakeholders, or entities involved
+3. Main topics, issues, or subjects addressed
+4. Important decisions, recommendations, or proposals
+5. Financial information, costs, or budget implications
+6. Timeline, deadlines, or critical dates mentioned
+7. Risks, concerns, or potential issues identified
+8. Required actions, approvals, or follow-up steps
+9. Compliance, regulatory, or legal considerations
+10. Overall significance and recommended next steps
+
+**Key Information Extracted**
+
+**Document Overview:**
+- Document Title: [Title or subject]
+- Document Date: [Creation or effective date]
+- Author/Sender: [Who created or sent the document]
+- Recipients: [Intended audience or recipients]
+- Document Purpose: [Primary objective or reason]
+
+**Key Stakeholders:**
+- Primary Parties: [Main individuals or organizations involved]
+- Decision Makers: [Who has authority or approval rights]
+- Affected Parties: [Who is impacted by the document content]
+
+**Important Dates:**
+- Document Date: [When document was created]
+- Effective Date: [When content becomes active]
+- Deadline Dates: [Critical timelines or due dates]
+- Review Dates: [Scheduled follow-up or assessment dates]
+
+**Financial Information:**
+- Budget Items: [Costs, expenses, or financial allocations]
+- Revenue Impact: [Income or financial benefits]
+- Cost Implications: [Financial risks or obligations]
+
+**Action Items & Requirements:**
+- Immediate Actions: [What needs to be done right away]
+- Approval Requirements: [Who needs to sign off or authorize]
+- Follow-up Tasks: [Ongoing or future responsibilities]
+
+**Compliance & Risk Assessment**
+
+**Potential Risks:**
+- [HIGH/MEDIUM/LOW] [Specific risks with brief explanations]
+
+**Missing Information:**
+- [Critical details that should be present but aren't]
+- [Questions that need answers for complete understanding]
+
+**Compliance Considerations:**
+- [Regulatory requirements that may apply]
+- [Legal or policy implications identified]
+
+**Actionable Recommendations**
+
+**Immediate Actions Required:**
+- [High-priority items needing attention]
+
+**Follow-up Actions:**
+- [Medium-term tasks and responsibilities]
+
+**Stakeholder Communications:**
+- [Who needs to be informed and about what]
+
+**DOCUMENT CONTENT TO ANALYZE:**
+{extracted_text}
+"""
