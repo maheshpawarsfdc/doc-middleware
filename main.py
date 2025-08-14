@@ -13,6 +13,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import asyncio
 from contextlib import asynccontextmanager
+import json
+from typing import Dict, Any
 
 # Configure logging
 logging.basicConfig(
@@ -919,3 +921,240 @@ Your summary MUST clearly state:
 **DOCUMENT CONTENT TO ANALYZE:**
 {extracted_text}
 """
+async def call_gemini_with_retry(prompt: str, request_id: str) -> str:
+    """Call Gemini API with retry logic and proper error handling"""
+    
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        logger.error(f"[{request_id}] ❌ GEMINI_API_KEY not found in environment")
+        raise HTTPException(status_code=500, detail="Gemini API key not configured")
+    
+    # Gemini API endpoint
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
+    
+    # Prepare the request payload
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": prompt
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.1,
+            "topK": 40,
+            "topP": 0.95,
+            "maxOutputTokens": 8192,
+            "stopSequences": []
+        },
+        "safetySettings": [
+            {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+            },
+            {
+                "category": "HARM_CATEGORY_HATE_SPEECH",
+                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+            },
+            {
+                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+            },
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+            }
+        ]
+    }
+    
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Document-Analysis-Middleware/2.0.0"
+    }
+    
+    # Retry logic
+    for attempt in range(MAX_RETRIES):
+        try:
+            logger.info(f"[{request_id}] 🔄 Calling Gemini API (attempt {attempt + 1}/{MAX_RETRIES})")
+            
+            response = requests_session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=GEMINI_TIMEOUT
+            )
+            
+            # Log response details for debugging
+            logger.info(f"[{request_id}] 📊 Gemini API Response Status: {response.status_code}")
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                # Extract the generated text
+                try:
+                    generated_text = result['candidates'][0]['content']['parts'][0]['text']
+                    logger.info(f"[{request_id}] ✅ Gemini API call successful, response length: {len(generated_text)} characters")
+                    return generated_text.strip()
+                except (KeyError, IndexError) as e:
+                    logger.error(f"[{request_id}] ❌ Unexpected Gemini API response structure: {str(e)}")
+                    logger.error(f"[{request_id}] Response: {result}")
+                    raise HTTPException(status_code=500, detail="Unexpected API response format")
+            
+            elif response.status_code == 400:
+                error_detail = extract_gemini_error(response, request_id)
+                logger.error(f"[{request_id}] ❌ Gemini API bad request: {error_detail}")
+                raise HTTPException(status_code=400, detail=f"Invalid request to Gemini API: {error_detail}")
+            
+            elif response.status_code == 401:
+                logger.error(f"[{request_id}] ❌ Gemini API authentication failed")
+                raise HTTPException(status_code=500, detail="Gemini API authentication failed")
+            
+            elif response.status_code == 403:
+                error_detail = extract_gemini_error(response, request_id)
+                logger.error(f"[{request_id}] ❌ Gemini API access denied: {error_detail}")
+                raise HTTPException(status_code=403, detail=f"Access denied by Gemini API: {error_detail}")
+            
+            elif response.status_code == 429:
+                # Rate limiting - retry with exponential backoff
+                retry_delay = INITIAL_RETRY_DELAY * (2 ** attempt)
+                logger.warning(f"[{request_id}] ⚠️ Rate limited by Gemini API, retrying in {retry_delay}s")
+                
+                if attempt < MAX_RETRIES - 1:  # Don't sleep on the last attempt
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    raise HTTPException(status_code=429, detail="Gemini API rate limit exceeded")
+            
+            elif response.status_code >= 500:
+                # Server error - retry with exponential backoff
+                retry_delay = INITIAL_RETRY_DELAY * (2 ** attempt)
+                logger.warning(f"[{request_id}] ⚠️ Gemini API server error ({response.status_code}), retrying in {retry_delay}s")
+                
+                if attempt < MAX_RETRIES - 1:  # Don't sleep on the last attempt
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    error_detail = extract_gemini_error(response, request_id)
+                    raise HTTPException(status_code=502, detail=f"Gemini API server error: {error_detail}")
+            
+            else:
+                # Unexpected status code
+                error_detail = extract_gemini_error(response, request_id)
+                logger.error(f"[{request_id}] ❌ Unexpected Gemini API status {response.status_code}: {error_detail}")
+                raise HTTPException(status_code=502, detail=f"Unexpected Gemini API response: {error_detail}")
+                
+        except requests.exceptions.Timeout:
+            logger.warning(f"[{request_id}] ⚠️ Gemini API timeout (attempt {attempt + 1}/{MAX_RETRIES})")
+            if attempt == MAX_RETRIES - 1:
+                raise HTTPException(status_code=504, detail="Gemini API request timed out")
+            await asyncio.sleep(INITIAL_RETRY_DELAY * (2 ** attempt))
+            
+        except requests.exceptions.ConnectionError:
+            logger.warning(f"[{request_id}] ⚠️ Gemini API connection error (attempt {attempt + 1}/{MAX_RETRIES})")
+            if attempt == MAX_RETRIES - 1:
+                raise HTTPException(status_code=502, detail="Unable to connect to Gemini API")
+            await asyncio.sleep(INITIAL_RETRY_DELAY * (2 ** attempt))
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[{request_id}] ❌ Gemini API request failed: {str(e)}")
+            if attempt == MAX_RETRIES - 1:
+                raise HTTPException(status_code=502, detail=f"Gemini API request failed: {str(e)}")
+            await asyncio.sleep(INITIAL_RETRY_DELAY * (2 ** attempt))
+    
+    # This should not be reached, but just in case
+    raise HTTPException(status_code=500, detail="Maximum retries exceeded for Gemini API")
+
+
+def extract_gemini_error(response: requests.Response, request_id: str) -> str:
+    """Extract error details from Gemini API response"""
+    try:
+        error_data = response.json()
+        
+        # Try to extract the error message
+        if 'error' in error_data:
+            error_info = error_data['error']
+            if isinstance(error_info, dict):
+                message = error_info.get('message', 'Unknown error')
+                code = error_info.get('code', 'Unknown code')
+                return f"{message} (Code: {code})"
+            else:
+                return str(error_info)
+        
+        return f"HTTP {response.status_code} - {response.reason}"
+        
+    except json.JSONDecodeError:
+        logger.warning(f"[{request_id}] ⚠️ Could not parse error response as JSON")
+        return f"HTTP {response.status_code} - {response.reason}"
+    except Exception as e:
+        logger.warning(f"[{request_id}] ⚠️ Error extracting error details: {str(e)}")
+        return f"HTTP {response.status_code} - {response.reason}"
+
+
+# ----------------------------
+# Optional: Follow-up Chat Endpoint
+# ----------------------------
+
+@app.post("/followup")
+async def followup_chat(payload: FollowupPayload):
+    """Handle follow-up questions about previously analyzed documents"""
+    request_id = str(int(time.time() * 1000))
+    logger.info(f"[{request_id}] 💬 Processing follow-up chat with {len(payload.messages)} messages")
+    
+    try:
+        # Input validation
+        if not payload.messages:
+            raise HTTPException(status_code=400, detail="Messages array cannot be empty")
+        
+        if len(payload.messages) > 50:  # Reasonable limit for conversation history
+            raise HTTPException(status_code=400, detail="Too many messages in conversation history")
+        
+        # Build conversation prompt for Gemini
+        conversation_prompt = build_followup_prompt(payload.messages)
+        
+        # Call Gemini API
+        response = await call_gemini_with_retry(conversation_prompt, request_id)
+        
+        logger.info(f"[{request_id}] ✅ Follow-up chat completed successfully")
+        return {
+            "response": response,
+            "status": "success",
+            "request_id": request_id,
+            "timestamp": time.time()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[{request_id}] ❌ Follow-up chat error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Follow-up chat failed: {str(e)}")
+
+
+def build_followup_prompt(messages: List[Message]) -> str:
+    """Build a conversational prompt from message history"""
+    
+    prompt_parts = [
+        "You are an expert document analysis assistant. A user is asking follow-up questions about a document that was previously analyzed.",
+        "",
+        "INSTRUCTIONS:",
+        "- Provide helpful, accurate answers based on the conversation context",
+        "- If you need to refer to specific document details, ask for clarification",
+        "- Keep responses concise and focused on the user's question",
+        "- If the question is outside the scope of document analysis, politely redirect",
+        "",
+        "CONVERSATION HISTORY:"
+    ]
+    
+    # Add message history
+    for i, message in enumerate(messages):
+        role = "USER" if message.role.lower() in ['user', 'human'] else "ASSISTANT"
+        prompt_parts.append(f"{role}: {message.content.strip()}")
+    
+    prompt_parts.extend([
+        "",
+        "Please provide a helpful response to the user's most recent message."
+    ])
+    
+    return "\n".join(prompt_parts)
